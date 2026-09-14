@@ -13,7 +13,7 @@ AntialiasResizer::AntialiasResizer(int inW, int inH, int outW, int outH) :
 	PrecomputeCoeffs(inH, outH, vBounds, vWeights, vK_);
 }
 
-void AntialiasResizer::Resize(const cv::Mat& src, cv::Mat& dst) const
+void AntialiasResizer::Resize(const cv::Mat& src, cv::Mat& dst, cv::Mat& scratch) const
 {
 	const int inH = src.rows, inW = src.cols;
 	const int outW = outW_, outH = outH_;
@@ -31,7 +31,8 @@ void AntialiasResizer::Resize(const cv::Mat& src, cv::Mat& dst) const
 
 	// Horizontal pass: [inH x inW] -> [inH x outW]. Scratch is LOCAL, so this
 	// function is safe to call concurrently from the batch parallel_for.
-	cv::Mat hpass(inH, outW, CV_8UC3);
+	CV_Assert(scratch.rows == inH_ && scratch.cols == outW_ && scratch.type() == CV_8UC3);
+	cv::Mat & hpass = scratch;
 	for (int y = 0; y < inH; ++y) {
 		const uint8_t* srow = src.ptr<uint8_t>(y);
 		uint8_t* hrow = hpass.ptr<uint8_t>(y);
@@ -115,12 +116,5 @@ cv::Mat AntialiasResizer::MakeScratch() const
 {
 	cv::Mat m(inH_, outW_, CV_8UC3);
 	std::memset(m.data, 0, m.total() * m.elemSize());
-	return m;
-}
-
-cv::Mat AntialiasResizer::MakeDestination() const
-{
-	cv::Mat m(outH_, outW_, CV_8UC3);
-	std::memset(m.data, 0, m.total() * m.elemSize());  // commit delle pagine
 	return m;
 }

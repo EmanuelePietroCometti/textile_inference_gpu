@@ -12,7 +12,6 @@ public:
 	int OutW() const;
 	int OutH() const;
 	cv::Mat MakeScratch() const;
-	cv::Mat MakeDestination() const;
 private:
 	static void PrecomputeCoeffs(int inSize, int outSize, std::vector<int>& bounds, std::vector<double>& weights, int& ksize);
 	static uint8_t RoundClipU8(double v);
