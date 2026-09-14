@@ -1,4 +1,4 @@
-#include "LoadConfiguration.h"
+#include "IniConfig.h"
 
 IniConfig::IniConfig()
 {

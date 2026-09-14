@@ -1,18 +1,7 @@
 #include "ContractMetadata.h"
 #include "AsyncLogger.h"
 #include <stdexcept>
-
-Metadata::Metadata(
-	std::string contractVersionFieldName, 
-	std::string preprocColorConversionFieldName, 
-	std::string minScoreFieldName, 
-	std::string maxScoreFieldName, 
-	std::string thresholdFieldName, 
-	std::string pixelthresholdFieldName, 
-	std::string calibationStatusFieldName,
-	std::string normalizationFormulaFieldName,
-	std::string normalizationInsideGraph
-) :
+ContractMetadata::ContractMetadata(ContractKeys keys) :
 	normalizationInGraph(false),
 	convertBgrToRgb(true),
 	hasPixelThreshold(false),
@@ -23,24 +12,12 @@ Metadata::Metadata(
 	mapMax(1.0f),
 	scoreThreshold(0.5f),
 	pixelThreshold(0.5f),
-	contractVersionFieldName_(contractVersionFieldName),
-	preprocColorConversionFieldName_(preprocColorConversionFieldName),
-	minScoreFieldName_(minScoreFieldName),
-	maxScoreFieldName_(maxScoreFieldName),
-	thresholdFieldName_(thresholdFieldName),
-	pixelthresholdFieldName_(pixelthresholdFieldName),
-	calibationStatusFieldName_(calibationStatusFieldName),
-	normalizationFormulaFieldName_(normalizationFormulaFieldName),
-	normalizationInsideGraphFieldName_(normalizationInsideGraph)
-{
-	
-}
-
-Metadata::~Metadata()
+	keys_(std::move(keys))
 {
 }
 
-void Metadata::Load(Ort::Session& session)
+
+void ContractMetadata::Load(Ort::Session& session)
 {
 	Ort::AllocatorWithDefaultOptions allocator;
 	Ort::ModelMetadata metadata = session.GetModelMetadata();
@@ -63,111 +40,130 @@ void Metadata::Load(Ort::Session& session)
 		return true;
 	};
 
-	contractVersion = lookupString(contractVersionFieldName_.c_str());
+	contractVersion = lookupString(keys_.normalizationInsideGraph.c_str());
 	if (contractVersion.empty())
 	{
-		Log::Warning("Metadata '{}' missing. Proceeding assuming backwards compatibility.", contractVersionFieldName_);
+		Log::Warning("Metadata '{}' missing. Proceeding assuming backwards compatibility.", keys_.contractVersion);
 	}
 	else
 	{
 		Log::Info("ONNX Contract Version validated: {}", contractVersion);
 	}
 
-	const std::string normalization = lookupString(normalizationInsideGraphFieldName_.c_str());
+	const std::string normalization = lookupString(keys_.normalizationInsideGraph.c_str());
 	normalizationInGraph = (normalization == "true");
 	if (!normalizationInGraph) {
-		Log::Warning("### WARNING: '{}'='{}' (expected 'true'). Host will apply ImageNet normalization as fallback.", normalizationFormulaFieldName_ ,normalization);
+		Log::Warning("### WARNING: '{}'='{}' (expected 'true'). Host will apply ImageNet normalization as fallback.", keys_.normalizationInsideGraph ,normalization);
 	}
 
-	const std::string colorConversion = lookupString(preprocColorConversionFieldName_.c_str());
+	const std::string colorConversion = lookupString(keys_.preprocColorConversion.c_str());
 	convertBgrToRgb = colorConversion.empty() || colorConversion == "bgr2rgb";
-	Log::Info("Metadata '{}' = '{}' -> BGR2RGB swap {}.", preprocColorConversionFieldName_ ,colorConversion.empty() ? "(missing, default)" : colorConversion, convertBgrToRgb ? "ENABLED" : "disabled");
+	Log::Info("Metadata '{}' = '{}' -> BGR2RGB swap {}.", keys_.preprocColorConversion ,colorConversion.empty() ? "(missing, default)" : colorConversion, convertBgrToRgb ? "ENABLED" : "disabled");
 
-	const std::string calibratedStatus = lookupString(calibationStatusFieldName_.c_str());
+	const std::string calibratedStatus = lookupString(keys_.calibrationStatus.c_str());
 	if (calibratedStatus != "true") 
 	{
-		Log::Warning("Model '{}' flag is not true. Using uncalibrated raw tensor bounds.", calibationStatusFieldName_);
+		Log::Warning("Model '{}' flag is not true. Using uncalibrated raw tensor bounds.", keys_.calibrationStatus);
 	}
 
-	hasMin = lookupFloat(minScoreFieldName_.c_str(), mapMin);
-	hasMax = lookupFloat(maxScoreFieldName_.c_str(), mapMax);
-	if (mapMax - mapMin <= 0.0f)
-	{
-		throw std::runtime_error("Invalid calibration metadata: map_max_raw must be greater than map_min_raw.");
-	}
+	// Assuming lookupFloat and keys_ (ContractKeys) are available in the class scope
+	bool hasMin = lookupFloat(keys_.minScore.c_str(), mapMin);
+	bool hasMax = lookupFloat(keys_.maxScore.c_str(), mapMax);
+	bool hasThreshold = lookupFloat(keys_.threshold.c_str(), scoreThreshold);
+	bool hasPixelThreshold = lookupFloat(keys_.pixelThreshold.c_str(), pixelThreshold);
 
-
-	hasThreshold = lookupFloat(thresholdFieldName_.c_str(), scoreThreshold);
-	hasPixelThreshold = lookupFloat(pixelthresholdFieldName_.c_str(), pixelThreshold);
-
+	// check completeness: if a key is missing, the variables retain their default 
+	// or uninitialized values, and the range guard below would misdiagnose the problem.
 	if (!hasMin || !hasMax || !hasThreshold || !hasPixelThreshold)
 	{
+		std::string missing;
+		// Lambda to append missing keys dynamically
+		auto note = [&missing](bool present, const std::string& key) {
+			if (present) return;
+			if (!missing.empty()) missing += ", ";
+			missing += key;
+			};
+
+		note(hasMin, keys_.minScore);
+		note(hasMax, keys_.maxScore);
+		note(hasThreshold, keys_.threshold);
+		note(hasPixelThreshold, keys_.pixelThreshold);
+
 		throw std::runtime_error(
-			"Anomaly model rejected: calibration metadata is incomplete "
+			"Anomaly model rejected: calibration metadata is incomplete. Missing keys: " + missing
 		);
 	}
 
-	const std::string normFormula = lookupString(normalizationFormulaFieldName_.c_str());
+	// THEN check the range, now that we are certain both values actually came from the model.
+	if (mapMax - mapMin <= 0.0f)
+	{
+		throw std::runtime_error(fmt::format(
+			"Invalid calibration metadata: '{}' ({}) must be greater than '{}' ({}).",
+			keys_.maxScore, mapMax, keys_.minScore, mapMin
+		));
+	}
+
+	const std::string normFormula = lookupString(keys_.normalizationFormula.c_str());
 	if (!normFormula.empty() && normFormula != "minmax")
 	{
-		Log::Warning("Model exported with '{}'='{}'. C++ engine uses 'minmax' natively.", normalizationFormulaFieldName_,normFormula);
+		Log::Warning("Model exported with '{}'='{}'. C++ engine uses 'minmax' natively.", keys_.normalizationFormula,normFormula);
 	}
 
 	Log::Info("Contract limits verified. mapMin={}, mapMax={}, scoreThreshold={}, pixelThreshold={} (present={}), normalizationInGraph={}.",
 		mapMin, mapMax, scoreThreshold, pixelThreshold, hasPixelThreshold, normalizationInGraph);
 }
 
-bool Metadata::NormalizationInGraph() const
+bool ContractMetadata::NormalizationInGraph() const
 {
 	return normalizationInGraph;
 }
 
-bool Metadata::ConvertBgrToRgb() const
+bool ContractMetadata::ConvertBgrToRgb() const
 {
 	return convertBgrToRgb;
 }
 
-bool Metadata::HasPixelThreshold() const
+bool ContractMetadata::HasPixelThreshold() const
 {
 	return hasPixelThreshold;
 }
 
-bool Metadata::HasMin() const
+bool ContractMetadata::HasMin() const
 {
 	return hasMin;
 }
 
-bool Metadata::HasMax() const
+bool ContractMetadata::HasMax() const
 {
 	return hasMax;
 }
 
-bool Metadata::HasThreshold() const
+bool ContractMetadata::HasThreshold() const
 {
 	return hasThreshold;
 }
 
-float Metadata::MapMin() const
+float ContractMetadata::MapMin() const
 {
 	return mapMin;
 }
 
-float Metadata::MapMax() const
+float ContractMetadata::MapMax() const
 {
 	return mapMax;
 }
 
-float Metadata::ScoreThreshold() const
+float ContractMetadata::ScoreThreshold() const
 {
 	return scoreThreshold;
 }
 
-float Metadata::PixelThreshold() const
+float ContractMetadata::PixelThreshold() const
 {
 	return pixelThreshold;
 }
 
-const std::string& Metadata::ContractVersion() const
+const std::string& ContractMetadata::ContractVersion() const
 {
 	return contractVersion;
 }

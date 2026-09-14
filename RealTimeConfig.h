@@ -60,9 +60,9 @@ namespace RT {
      * `THREAD_MODE_BACKGROUND_BEGIN`). Ideal for offloading non-critical tasks like asynchronous
      * logging to prevent them from stealing CPU cycles from the critical path.
      *
-     * @return A `DWORD` representing the thread's previous priority level, allowing for later restoration.
+     * @return `0` on success, otherwise the code from `GetLastError()`.
      */
-    DWORD ConfigureBackgroundThread();
+    [[nodiscard]] DWORD ConfigureBackgroundThread();
 
     /**
      * @brief Configures the calling thread for strict real-time execution.
@@ -71,9 +71,9 @@ namespace RT {
      * Use this exclusively for the hottest paths in the pipeline to guarantee microsecond-level
      * scheduling accuracy.
      *
-     * @return A `DWORD` representing the thread's previous priority level.
+     * @return `0` on success, otherwise the code from `GetLastError()`.
      */
-    DWORD ConfigureRealtimeThread();
+    [[nodiscard]] DWORD ConfigureRealtimeThread();
 
     /**
      * @brief Applies a specific priority class to the current thread or process.

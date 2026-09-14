@@ -1,8 +1,11 @@
 #include "RollingAverage.h"
+#include <stdexcept>
 
 RollingField::RollingField(size_t windowSize) :
 	window(windowSize)
 {
+	if (windowSize == 0)
+		throw std::invalid_argument("RollingField: windowSize deve essere > 0");
 }
 
 void RollingField::add(double value)

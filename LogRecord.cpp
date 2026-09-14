@@ -1,5 +1,6 @@
 #include "LogRecord.h"
 #include <cassert>
+#include <string>
 
 
 LogRecord::LogRecord(std::size_t maxMessageChars) : buffer_(maxMessageChars)
@@ -27,6 +28,10 @@ std::chrono::system_clock::time_point LogRecord::timestamp() const
 bool LogRecord::truncated() const 
 {
 	return truncated_;
+}
+
+std::size_t LogRecord::capacity() const {
+	return buffer_.size();
 }
 
 void LogRecord::assign(LogLevel level, std::chrono::system_clock::time_point ts, std::string_view msg)

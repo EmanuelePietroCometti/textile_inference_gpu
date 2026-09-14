@@ -76,6 +76,8 @@ public:
      */
     bool truncated() const;
 
+    /** @brief Capacity of the pre-allocated buffer, in characters. */
+    std::size_t capacity() const;
 private:
     std::vector<char> buffer_; ///< Pre-allocated memory buffer to store the message payload without heap allocations.
     std::chrono::system_clock::time_point timestamp_{}; ///< Timestamp of the logged event.

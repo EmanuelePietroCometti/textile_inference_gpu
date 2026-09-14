@@ -57,15 +57,14 @@ void PerformanceMetrics::addPostprocessingTime(double t)
 
 void PerformanceMetrics::printRollingAverage(int window)
 {
-	const uint64_t n = completedBatches.load(std::memory_order_relaxed);
-	if (window <= 0 || n % (uint64_t)window != 0) return;
+	const int64_t n = completedBatches.load(std::memory_order_relaxed);
+	if (window <= 0 || n % window != 0) return;
 
 	Log::Info("[MONITOR] Batch {}-{} | per-batch(ms) CPU:{:.2f} DMA:{:.2f} | "
 		"GPUwall:{:.2f} = H2D:{:.3f}+Run:{:.3f}+D2H:{:.3f} | Out:{:.2f}",
-		n - (uint64_t)window + 1, n,
+		n - window + 1, n,
 		preprocessing.average(), batchPrep.average(), gpu.average(),
 		h2d.average(), run.average(), d2h.average(), postprocessing.average());
-	PerformanceMetrics::clear();
 }
 
 PerformanceMetrics::Snapshot PerformanceMetrics::snapshot() const

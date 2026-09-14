@@ -5,6 +5,7 @@
 #include <fmt/core.h>
 #include <fmt/color.h>
 #include <fmt/format.h>
+#include <stdexcept>
 #include "RealTimeConfig.h"
 
 static bool s_ansiColorSupported = false;
@@ -57,7 +58,13 @@ AsyncLogger::AsyncLogger(size_t maxMessageChars, size_t queueCapacity, size_t fl
 	queue(queueCapacity, LogRecord(maxMessageChars))
 {
 	AsyncLogger* expected = nullptr;
-	assert(g_instance.compare_exchange_strong(expected, this) && "una sola istanza");
+	// The CAS (Compare-And-Swap) must ALWAYS occur: if placed inside an assert(), 
+	// it would be compiled out when NDEBUG is defined. Consequently, g_instance 
+	// would remain nullptr, turning every Log::* call into a silent no-op in Release builds.
+	if (!g_instance.compare_exchange_strong(expected, this))
+	{
+		throw std::logic_error("AsyncLogger: only one instance is allowed per process.");
+	}
 }
 
 AsyncLogger::~AsyncLogger()
@@ -137,6 +144,9 @@ void AsyncLogger::Write(LogLevel level, fmt::string_view fmtStr, fmt::format_arg
 	const auto ts = std::chrono::system_clock::now();
 
 	thread_local LogRecord scratch(maxMessageChars);
+	// The scratch buffer is sized on the FIRST Write from this thread. This is correct
+	// only because the constructor guarantees a single instance of AsyncLogger.
+	assert(scratch.capacity() == maxMessageChars);
 
 	thread_local fmt::memory_buffer tmp;
 	tmp.clear();

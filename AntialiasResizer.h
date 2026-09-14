@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>
+#include <vector>
 #include <opencv2/opencv.hpp>
 
 
@@ -12,11 +14,12 @@ public:
 	int OutW() const;
 	int OutH() const;
 	cv::Mat MakeScratch() const;
+	cv::Mat MakeDestination() const;
 private:
 	static void PrecomputeCoeffs(int inSize, int outSize, std::vector<int>& bounds, std::vector<double>& weights, int& ksize);
 	static uint8_t RoundClipU8(double v);
 	int inW_, inH_, outW_, outH_, hK_, vK_;
 	std::vector<int> hBounds, vBounds;
 	std::vector<double> hWeights, vWeights;
-	bool identity;
+	bool identity_;
 };

@@ -18,6 +18,7 @@ RealTimeScope::RealTimeScope()
 	{
 		realtime_ = elevated_ = true;
 		Log::Info("[RT] Process priority class: REALTIME");
+		return;
 	}
 
 	if (applied == HIGH_PRIORITY_CLASS)

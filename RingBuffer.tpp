@@ -25,14 +25,9 @@ inline RingBuffer<T>::~RingBuffer()
 template<typename T>
 inline bool RingBuffer<T>::push(T item)
 {
-	{
-		std::unique_lock<std::mutex> lock(mutex);
-		notFull.wait(lock, [this] {return count < slots_.size() || stopped; });
-		if (stopped) return false;
-		push_locked(item);
-	}
-	notEmpty.notify_one();
-	return true;
+	// 'item' is already a local copy: delegate to the swap variant, which contains
+	// the sole implementation of the locking protocol.
+	return push_swap(item);
 }
 
 template<typename T>
@@ -51,13 +46,7 @@ inline bool RingBuffer<T>::pop(T& item)
 template<typename T>
 inline bool RingBuffer<T>::try_push(T item)
 {
-	{
-		std::lock_guard<std::mutex> lock(mutex);
-		if (stopped || count == slots_.size()) return false;
-		push_locked(item);
-	}
-	notEmpty.notify_one();
-	return true;
+	return try_push_swap(item);
 }
 
 template<typename T>

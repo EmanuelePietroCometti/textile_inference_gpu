@@ -1,4 +1,7 @@
 #include "AntialiasResizer.h"
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 
 AntialiasResizer::AntialiasResizer(int inW, int inH, int outW, int outH) :
 	inW_(inW),
@@ -7,7 +10,7 @@ AntialiasResizer::AntialiasResizer(int inW, int inH, int outW, int outH) :
 	outH_(outH),
 	hK_(0),
 	vK_(0),
-	identity(inW == inW_ && inH == inH_)
+	identity_(inW == inW_ && inH == inH_)
 {
 	PrecomputeCoeffs(inW, outW, hBounds, hWeights, hK_);
 	PrecomputeCoeffs(inH, outH, vBounds, vWeights, vK_);
@@ -15,7 +18,10 @@ AntialiasResizer::AntialiasResizer(int inW, int inH, int outW, int outH) :
 
 void AntialiasResizer::Resize(const cv::Mat& src, cv::Mat& dst, cv::Mat& scratch) const
 {
-	const int inH = src.rows, inW = src.cols;
+	CV_Assert(src.type() == CV_8UC3);
+	CV_Assert(Matches(src.cols, src.rows));
+
+	const int inH = inH_, inW = inW_;
 	const int outW = outW_, outH = outH_;
 
 	// Identity fast path. With inSize == outSize the triangle filter collapses
@@ -24,7 +30,7 @@ void AntialiasResizer::Resize(const cv::Mat& src, cv::Mat& dst, cv::Mat& scratch
 	// costs ~1.2M double MACs + ~400k std::floor per 256x256 image, which is the
 	// single largest item in the CPU preprocessing budget. Aliasing instead of
 	// copying keeps this at zero cost; dst is read-only for the caller.
-	if (identity && inW == outW && inH == outH) {
+	if (identity_) {
 		dst = src;
 		return;
 	}
@@ -50,6 +56,30 @@ void AntialiasResizer::Resize(const cv::Mat& src, cv::Mat& dst, cv::Mat& scratch
 			op[0] = RoundClipU8(a0); 
 			op[1] = RoundClipU8(a1); 
 			op[2] = RoundClipU8(a2);
+		}
+	}
+
+	// Vertical pass: [inH x outW] -> [outH x outW]. create() is a no-op when
+	// dst already has the correct shape and type (see MakeDestination).
+	dst.create(outH, outW, CV_8UC3);
+	for (int o = 0; o < outH; ++o) {
+		const int s = vBounds[o];
+		const int avail = (std::min)(vK_, inH - s);
+		const double* w = &vWeights[static_cast<size_t>(o) * vK_];
+		uint8_t * drow = dst.ptr<uint8_t>(o);
+		for (int x = 0; x < outW; ++x) {
+			double a0 = 0.0, a1 = 0.0, a2 = 0.0;
+			for (int t = 0; t < avail; ++t) {
+				const uint8_t * px = hpass.ptr<uint8_t>(s + t) + static_cast<size_t>(x) * 3;
+				const double wt = w[t];
+				a0 += wt * px[0]; a1 += wt * px[1]; a2 += wt * px[2];
+			
+			}
+			uint8_t * op = drow + static_cast<size_t>(x) * 3;
+			op[0] = RoundClipU8(a0);
+			op[1] = RoundClipU8(a1);
+			op[2] = RoundClipU8(a2);
+
 		}
 	}
 }
@@ -93,8 +123,8 @@ void AntialiasResizer::PrecomputeCoeffs(int inSize, int outSize, std::vector<int
 		const double center = (o + 0.5) * scale;
 		int xmin = static_cast<int>(center - support + 0.5);
 		if (xmin < 0) xmin = 0;
-		int xmax = static_cast<int>(center - support + 0.5);
-		if (xmax < 0) xmax = 0;
+		int xmax = static_cast<int>(center + support + 0.5);
+		if (xmax > inSize) xmax = inSize;
 		
 		const int n = xmax - xmin;
 		double total = 0.0;
@@ -108,7 +138,7 @@ void AntialiasResizer::PrecomputeCoeffs(int inSize, int outSize, std::vector<int
 
 		if (total > 0.0)
 			for (int t = 0; t < n; ++t) weights[static_cast<size_t>(o) * ksize + t] /= total;
-		bounds[0] = xmin;
+		bounds[o] = xmin;
 	}
 }
 
@@ -116,5 +146,13 @@ cv::Mat AntialiasResizer::MakeScratch() const
 {
 	cv::Mat m(inH_, outW_, CV_8UC3);
 	std::memset(m.data, 0, m.total() * m.elemSize());
+	return m;
+}
+
+cv::Mat AntialiasResizer::MakeDestination() const
+{
+	if (identity_) return cv::Mat();   // il fast path aliasa src, il buffer sarebbe sprecato
+	cv::Mat m(outH_, outW_, CV_8UC3);
+	std::memset(m.data, 0, m.total() * m.elemSize());   // commit delle pagine
 	return m;
 }

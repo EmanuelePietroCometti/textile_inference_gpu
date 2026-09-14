@@ -140,7 +140,7 @@
     <ClCompile Include="AntialiasResizer.cpp" />
     <ClCompile Include="AsyncLogger.cpp" />
     <ClCompile Include="ContractMetadata.cpp" />
-    <ClCompile Include="LoadConfiguration.cpp" />
+    <ClCompile Include="IniConfig.cpp" />
     <ClCompile Include="LogRecord.cpp" />
     <ClCompile Include="PerformanceMetrics.cpp" />
     <ClCompile Include="RealTimeConfig.cpp" />
@@ -153,7 +153,7 @@
     <ClInclude Include="ContractMetadata.h" />
     <ClInclude Include="RealTimeConfig.h" />
     <ClInclude Include="RingBuffer.h" />
-    <ClInclude Include="LoadConfiguration.h" />
+    <ClInclude Include="IniConfig.h" />
     <ClInclude Include="LogRecord.h" />
     <ClInclude Include="PerformanceMetrics.h" />
     <ClInclude Include="RollingAverage.h" />

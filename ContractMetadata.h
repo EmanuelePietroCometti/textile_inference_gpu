@@ -4,6 +4,24 @@
 #include <onnxruntime_cxx_api.h>
 
 /**
+ * @brief Names of the contract keys written by the ONNX exporter.
+ *
+ * The defaults correspond to the anomaly-onnx-export tool. Override them
+ * only to read models produced by a different exporter.
+ */
+struct ContractKeys {
+    std::string contractVersion = "contract_version";
+    std::string preprocColorConversion = "preproc_color_conversion";
+    std::string minScore = "map_min_raw";
+    std::string maxScore = "map_max_raw";
+    std::string threshold = "image_threshold_raw";
+    std::string pixelThreshold = "pixel_threshold_raw";
+    std::string calibrationStatus = "calibrated";
+    std::string normalizationFormula = "normalization_formula";
+    std::string normalizationInsideGraph = "normalize_inside_graph";
+};
+
+/**
  * @brief Extractor and container for custom metadata embedded within an ONNX model.
  *
  * @details This class is responsible for querying an `Ort::Session` to extract specific
@@ -11,7 +29,7 @@
  * It stores critical inference configurations such as color space requirements, normalization
  * strategies, and post-processing thresholds (e.g., for anomaly detection or segmentation masks).
  */
-class Metadata {
+class ContractMetadata {
 public:
     /**
      * @brief Constructs the Metadata object by defining the keys used to query the ONNX model.
@@ -26,16 +44,7 @@ public:
      * @param normalizationFormulaFieldName Key specifying the formula used for input normalization.
      * @param normalizationInsideGraph Key indicating whether normalization is embedded as a graph node.
      */
-    Metadata(std::string contractVersionFieldName, std::string preprocColorConversionFieldName,
-        std::string minScoreFieldName, std::string maxScoreFieldName,
-        std::string thresholdFieldName, std::string pixelthresholdFieldName,
-        std::string calibationStatusFieldName, std::string normalizationFormulaFieldName,
-        std::string normalizationInsideGraph);
-
-    /**
-     * @brief Destructor.
-     */
-    ~Metadata();
+    explicit ContractMetadata(ContractKeys keys = {});
 
     /**
      * @brief Queries the loaded ONNX session and populates internal variables with the retrieved metadata.
@@ -113,16 +122,6 @@ public:
 private:
     bool normalizationInGraph, convertBgrToRgb, hasPixelThreshold, hasMin, hasMax, hasThreshold;
     float mapMin, mapMax, scoreThreshold, pixelThreshold;
-    std::string contractVersion, configIniPath;
-
-    // Stored keys used for ONNX metadata lookup
-    std::string contractVersionFieldName_;
-    std::string preprocColorConversionFieldName_;
-    std::string minScoreFieldName_;
-    std::string maxScoreFieldName_;
-    std::string thresholdFieldName_;
-    std::string pixelthresholdFieldName_;
-    std::string calibationStatusFieldName_;
-    std::string normalizationFormulaFieldName_;
-    std::string normalizationInsideGraphFieldName_;
+    std::string contractVersion;
+    ContractKeys keys_;
 };
