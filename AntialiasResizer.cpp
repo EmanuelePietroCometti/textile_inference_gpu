@@ -10,7 +10,7 @@ AntialiasResizer::AntialiasResizer(int inW, int inH, int outW, int outH) :
 	outH_(outH),
 	hK_(0),
 	vK_(0),
-	identity_(inW == inW_ && inH == inH_)
+	identity_(inW == outW && inH == outH)
 {
 	PrecomputeCoeffs(inW, outW, hBounds, hWeights, hK_);
 	PrecomputeCoeffs(inH, outH, vBounds, vWeights, vK_);

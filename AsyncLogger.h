@@ -6,7 +6,6 @@
 #include <thread>
 #include <fmt/format.h>
 #include "RingBuffer.h"
-#include "LoadConfiguration.h"
 #include "LogRecord.h"
 
 /**

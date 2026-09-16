@@ -10,3 +10,4 @@ SDK/"*.user"
 /textile_inference_gpu.vcxproj.user
 "*.vcxproj.user" 
 "SDK/" 
+/imports.txt

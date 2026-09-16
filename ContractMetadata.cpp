@@ -40,7 +40,7 @@ void ContractMetadata::Load(Ort::Session& session)
 		return true;
 	};
 
-	contractVersion = lookupString(keys_.normalizationInsideGraph.c_str());
+	contractVersion = lookupString(keys_.contractVersion.c_str());
 	if (contractVersion.empty())
 	{
 		Log::Warning("Metadata '{}' missing. Proceeding assuming backwards compatibility.", keys_.contractVersion);
@@ -67,10 +67,10 @@ void ContractMetadata::Load(Ort::Session& session)
 	}
 
 	// Assuming lookupFloat and keys_ (ContractKeys) are available in the class scope
-	bool hasMin = lookupFloat(keys_.minScore.c_str(), mapMin);
-	bool hasMax = lookupFloat(keys_.maxScore.c_str(), mapMax);
-	bool hasThreshold = lookupFloat(keys_.threshold.c_str(), scoreThreshold);
-	bool hasPixelThreshold = lookupFloat(keys_.pixelThreshold.c_str(), pixelThreshold);
+	hasMin = lookupFloat(keys_.minScore.c_str(), mapMin);
+	hasMax = lookupFloat(keys_.maxScore.c_str(), mapMax);
+	hasThreshold = lookupFloat(keys_.threshold.c_str(), scoreThreshold);
+	hasPixelThreshold = lookupFloat(keys_.pixelThreshold.c_str(), pixelThreshold);
 
 	// check completeness: if a key is missing, the variables retain their default 
 	// or uninitialized values, and the range guard below would misdiagnose the problem.

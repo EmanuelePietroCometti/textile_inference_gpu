@@ -104,7 +104,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>FMT_HEADER_ONLY;NOMINMAX</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\SDK\fmt-11.1.4\include;$(MSBuildProjectDirectory)\SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\include;$(MSBuildProjectDirectory)\SDK\opencv\build\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)SDK\fmt-11.1.4\include;$(SolutionDir)SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\include;$(SolutionDir)SDK\opencv\build\include;$(SolutionDir)SDK\TensorRT-10.16.1.11\include;$(CUDA_PATH)\include</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
@@ -112,9 +112,24 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(MSBuildProjectDirectory)\SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\lib;$(MSBuildProjectDirectory)\SDK\opencv\build\x64\vc16\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>onnxruntime.lib;nvinfer_10.lib;nvinfer_plugin_10.lib;nvonnxparser_10.lib;cudart.lib;cuda.lib;cublas.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\lib;$(SolutionDir)SDK\opencv\build\x64\vc16\lib;$(SolutionDir)SDK\TensorRT-10.16.1.11\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>onnxruntime.lib;nvinfer_10.lib;nvinfer_plugin_10.lib;nvonnxparser_10.lib;cudart.lib;cuda.lib;cublas.lib;opencv_world4120d.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <DelayLoadDLLs>onnxruntime.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(SolutionDir)SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\lib\*.dll" "$(OutDir)"
+xcopy /Y /D "$(SolutionDir)SDK\TensorRT-10.16.1.11\bin\*.dll" "$(OutDir)"
+xcopy /Y /D "$(SolutionDir)SDK\opencv\build\x64\vc16\bin\*d.dll" "$(OutDir)"
+xcopy /Y /D "$(CUDA_PATH)\bin\x64\cublas64_13.dll" "$(OutDir)"
+xcopy /Y /D "$(CUDA_PATH)\bin\x64\cublasLt64_13.dll" "$(OutDir)"
+xcopy /Y /D "$(CUDA_PATH)\bin\x64\cudart64_13.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>if exist "$(OutDir)TestData" rmdir /s /q "$(OutDir)TestData"
+for %%f in ("$(OutDir)*.dll" "$(OutDir)*.exe" "$(OutDir)*.pdb" "$(OutDir)*.lib" "$(OutDir)*.exp") do (
+    if /i "%%~nxf" neq "textile_inference_gpu_UnitTests.exe" if /i "%%~nxf" neq "textile_inference_gpu_UnitTests.dll" del /q "%%f"
+)</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -124,7 +139,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>FMT_HEADER_ONLY;NOMINMAX</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\SDK\fmt-11.1.4\include;$(MSBuildProjectDirectory)\SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\include;$(MSBuildProjectDirectory)\SDK\opencv\build\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)SDK\fmt-11.1.4\include;$(SolutionDir)SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\include;$(SolutionDir)SDK\opencv\build\include;$(SolutionDir)SDK\TensorRT-10.16.1.11\include;$(CUDA_PATH)\include</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
@@ -132,9 +147,24 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(MSBuildProjectDirectory)\SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\lib;$(MSBuildProjectDirectory)\SDK\opencv\build\x64\vc16\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>onnxruntime.lib;nvinfer_10.lib;nvinfer_plugin_10.lib;nvonnxparser_10.lib;cudart.lib;cuda.lib;cublas.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\lib;$(SolutionDir)SDK\opencv\build\x64\vc16\lib;$(SolutionDir)SDK\TensorRT-10.16.1.11\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>onnxruntime.lib;nvinfer_10.lib;nvinfer_plugin_10.lib;nvonnxparser_10.lib;cudart.lib;cuda.lib;cublas.lib;opencv_world4120.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <DelayLoadDLLs>onnxruntime.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(SolutionDir)SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\lib\*.dll" "$(OutDir)"
+xcopy /Y /D "$(SolutionDir)SDK\TensorRT-10.16.1.11\bin\*.dll" "$(OutDir)"
+xcopy /Y /D "$(SolutionDir)SDK\opencv\build\x64\vc16\bin\*.dll" "$(OutDir)"
+xcopy /Y /D "$(CUDA_PATH)\bin\x64\cublas64_13.dll" "$(OutDir)"
+xcopy /Y /D "$(CUDA_PATH)\bin\x64\cublasLt64_13.dll" "$(OutDir)"
+xcopy /Y /D "$(CUDA_PATH)\bin\x64\cudart64_13.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>if exist "$(OutDir)TestData" rmdir /s /q "$(OutDir)TestData"
+for %%f in ("$(OutDir)*.dll" "$(OutDir)*.exe" "$(OutDir)*.pdb" "$(OutDir)*.lib" "$(OutDir)*.exp") do (
+    if /i "%%~nxf" neq "textile_inference_gpu_UnitTests.exe" if /i "%%~nxf" neq "textile_inference_gpu_UnitTests.dll" del /q "%%f"
+)</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AntialiasResizer.cpp" />
