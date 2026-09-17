@@ -173,8 +173,10 @@ for %%f in ("$(OutDir)*.dll" "$(OutDir)*.exe" "$(OutDir)*.pdb" "$(OutDir)*.lib" 
     <ClCompile Include="IniConfig.cpp" />
     <ClCompile Include="LogRecord.cpp" />
     <ClCompile Include="MmfFrameSource.cpp" />
+    <ClCompile Include="OrtSession.cpp" />
     <ClCompile Include="PatchLayout.cpp" />
     <ClCompile Include="PerformanceMetrics.cpp" />
+    <ClCompile Include="PipelineConfig.cpp" />
     <ClCompile Include="RawFrame.cpp" />
     <ClCompile Include="RealTimeConfig.cpp" />
     <ClCompile Include="RollingAverage.cpp" />
@@ -185,7 +187,9 @@ for %%f in ("$(OutDir)*.dll" "$(OutDir)*.exe" "$(OutDir)*.pdb" "$(OutDir)*.lib" 
     <ClInclude Include="AsyncLogger.h" />
     <ClInclude Include="ContractMetadata.h" />
     <ClInclude Include="MmfFrameSource.h" />
+    <ClInclude Include="OrtSession.h" />
     <ClInclude Include="PatchLayout.h" />
+    <ClInclude Include="PipelineConfig.h" />
     <ClInclude Include="RawFrame.h" />
     <ClInclude Include="RealTimeConfig.h" />
     <ClInclude Include="RingBuffer.h" />

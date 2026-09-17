@@ -51,6 +51,12 @@
     <ClCompile Include="PatchLayout.cpp">
       <Filter>File di origine</Filter>
     </ClCompile>
+    <ClCompile Include="OrtSession.cpp">
+      <Filter>File di origine</Filter>
+    </ClCompile>
+    <ClCompile Include="PipelineConfig.cpp">
+      <Filter>File di origine</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="RingBuffer.h">
@@ -93,6 +99,12 @@
       <Filter>File di intestazione</Filter>
     </ClInclude>
     <ClInclude Include="PatchLayout.h">
+      <Filter>File di intestazione</Filter>
+    </ClInclude>
+    <ClInclude Include="OrtSession.h">
+      <Filter>File di intestazione</Filter>
+    </ClInclude>
+    <ClInclude Include="PipelineConfig.h">
       <Filter>File di intestazione</Filter>
     </ClInclude>
   </ItemGroup>
