@@ -42,6 +42,15 @@
     <ClCompile Include="AntialiasResizer.cpp">
       <Filter>File di origine</Filter>
     </ClCompile>
+    <ClCompile Include="MmfFrameSource.cpp">
+      <Filter>File di origine</Filter>
+    </ClCompile>
+    <ClCompile Include="RawFrame.cpp">
+      <Filter>File di origine</Filter>
+    </ClCompile>
+    <ClCompile Include="PatchLayout.cpp">
+      <Filter>File di origine</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="RingBuffer.h">
@@ -72,6 +81,18 @@
       <Filter>File di intestazione</Filter>
     </ClInclude>
     <ClInclude Include="AntialiasResizer.h">
+      <Filter>File di intestazione</Filter>
+    </ClInclude>
+    <ClInclude Include="SharedFrameContract.h">
+      <Filter>File di intestazione</Filter>
+    </ClInclude>
+    <ClInclude Include="MmfFrameSource.h">
+      <Filter>File di intestazione</Filter>
+    </ClInclude>
+    <ClInclude Include="RawFrame.h">
+      <Filter>File di intestazione</Filter>
+    </ClInclude>
+    <ClInclude Include="PatchLayout.h">
       <Filter>File di intestazione</Filter>
     </ClInclude>
   </ItemGroup>

@@ -172,7 +172,10 @@ for %%f in ("$(OutDir)*.dll" "$(OutDir)*.exe" "$(OutDir)*.pdb" "$(OutDir)*.lib" 
     <ClCompile Include="ContractMetadata.cpp" />
     <ClCompile Include="IniConfig.cpp" />
     <ClCompile Include="LogRecord.cpp" />
+    <ClCompile Include="MmfFrameSource.cpp" />
+    <ClCompile Include="PatchLayout.cpp" />
     <ClCompile Include="PerformanceMetrics.cpp" />
+    <ClCompile Include="RawFrame.cpp" />
     <ClCompile Include="RealTimeConfig.cpp" />
     <ClCompile Include="RollingAverage.cpp" />
     <ClCompile Include="textile_inference_gpu.cpp" />
@@ -181,12 +184,16 @@ for %%f in ("$(OutDir)*.dll" "$(OutDir)*.exe" "$(OutDir)*.pdb" "$(OutDir)*.lib" 
     <ClInclude Include="AntialiasResizer.h" />
     <ClInclude Include="AsyncLogger.h" />
     <ClInclude Include="ContractMetadata.h" />
+    <ClInclude Include="MmfFrameSource.h" />
+    <ClInclude Include="PatchLayout.h" />
+    <ClInclude Include="RawFrame.h" />
     <ClInclude Include="RealTimeConfig.h" />
     <ClInclude Include="RingBuffer.h" />
     <ClInclude Include="IniConfig.h" />
     <ClInclude Include="LogRecord.h" />
     <ClInclude Include="PerformanceMetrics.h" />
     <ClInclude Include="RollingAverage.h" />
+    <ClInclude Include="SharedFrameContract.h" />
     <ClInclude Include="SimpleIni.h" />
   </ItemGroup>
   <ItemGroup>
