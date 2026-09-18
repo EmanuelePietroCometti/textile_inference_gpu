@@ -80,36 +80,6 @@ namespace {
         return t;
     }
 
-    /**
-     * @brief Converts 8-bit interleaved BGR to 3 planar float channels (NCHW).
-     * @details Executed in a single pass over the pixel memory. Optimized with
-     * direct pointer increments for maximum auto-vectorization throughput.
-     */
-    void PackNchw(const cv::Mat& src, float* dst, const ChannelTransform& t)
-    {
-        const int H = src.rows;
-        const int W = src.cols;
-        const std::size_t plane = static_cast<std::size_t>(H) * W;
-
-        float* p0 = dst;
-        float* p1 = dst + plane;
-        float* p2 = dst + 2 * plane;
-
-        const int i0 = t.swapRB ? 2 : 0;
-        const int i2 = t.swapRB ? 0 : 2;
-
-        for (int y = 0; y < H; ++y) {
-            const uint8_t* row = src.ptr<uint8_t>(y);
-            // HPC Tip: Continuous pointer increments (*p++) bypass the need to 
-            // recalculate (base + x) offsets on every single pixel iteration.
-            for (int x = 0; x < W; ++x, row += 3) {
-                *p0++ = row[i0] * t.scale[0] + t.offset[0];
-                *p1++ = row[1] * t.scale[1] + t.offset[1];
-                *p2++ = row[i2] * t.scale[2] + t.offset[2];
-            }
-        }
-    }
-
 } // namespace
 
 
@@ -130,27 +100,37 @@ void PrepStage(const AppConfig& cfg,
     const PatchGeometry& g = cfg.Geometry();
     const ChannelTransform transform = MakeTransform(session.Contract());
 
-    // All scratch memory for this thread, allocated exactly once.
-    const AntialiasResizer resizer(static_cast<int>(g.stripWidth),
-        static_cast<int>(g.patchHeight),
-        session.ModelWidth(), session.ModelHeight());
-    cv::Mat scratch = resizer.MakeScratch();
-    cv::Mat dest = resizer.MakeDestination();
+    // ----------------------------------------------------------------------
+    // OPENCV DNN PARAMS SETUP
+    // ----------------------------------------------------------------------
+    cv::dnn::Image2BlobParams params;
+    params.datalayout = cv::dnn::DNN_LAYOUT_NCHW;
+    params.ddepth = CV_32F;
+    params.size = cv::Size(session.ModelWidth(), session.ModelHeight());
+    params.swapRB = transform.swapRB;
 
-    // Dummy run (Warmup): Forces the resolution of lazy thread_local allocations 
-    // inside the resizer and OpenCV now, preventing jitter on the first real batch.
-    {
-        cv::Mat warm(static_cast<int>(g.patchHeight), static_cast<int>(g.stripWidth), CV_8UC3, cv::Scalar::all(0));
-        cv::Mat wd = dest, ws = scratch;
-        resizer.Resize(warm, wd, ws);
-    }
+    // Map custom scaling to OpenCV's Scalar format (per-channel)
+    params.scalefactor = cv::Scalar(
+        transform.scale[0],
+        transform.scale[1],
+        transform.scale[2]
+    );
 
-    const std::size_t imgElems = session.InputElems() / session.BatchSize();
+    // Map offset to OpenCV's 'mean'. 
+    // Your math:  y = (x * scale) + offset
+    // OpenCV:     y = (x - mean) * scale
+    // Resolution: mean = -offset / scale
+    params.mean = cv::Scalar(
+        -transform.offset[0] / transform.scale[0],
+        -transform.offset[1] / transform.scale[1],
+        -transform.offset[2] / transform.scale[2]
+    );
+
     const int batch = session.BatchSize();
 
     for (;;) {
         RawFrame* raw = nullptr;
-        if (!qRaw.pop(raw)) break; // Queue stopped: exit thread cleanly
+        if (!qRaw.pop(raw)) break; // Queue stopped
 
         PipelineSlot* slot = nullptr;
         if (!slotPool.pop(slot)) {
@@ -159,28 +139,26 @@ void PrepStage(const AppConfig& cfg,
         }
 
         const auto t0 = std::chrono::steady_clock::now();
-
         const int n = (std::min)(batch, static_cast<int>(raw->patches.size()));
-        for (int i = 0; i < n; ++i) {
-            cv::Mat out = dest; // Zero-cost if resizer bypasses due to identity match
-            resizer.Resize(raw->patches[i], out, scratch);
-            PackNchw(out, slot->input + static_cast<std::size_t>(i) * imgElems, transform);
-        }
+
+        // Pass a vector of exactly 'n' mats. We slice the input patches.
+        std::vector<cv::Mat> current_patches(raw->patches.begin(), raw->patches.begin() + n);
+
+
+        // Zero-copy wrapping for the pre-allocated NCHW tensor
+        int sizes[] = { n, 3, session.ModelHeight(), session.ModelWidth() };
+        cv::Mat tensor_blob(4, sizes, CV_32F, slot->input);
+
+        // Single call to execute resize (INTER_LINEAR), color swap, math and packing
+        cv::dnn::blobFromImagesWithParams(current_patches, tensor_blob, params);
 
         slot->seq = raw->seq;
         slot->acquiredQPC = raw->acquiredQPC;
         slot->prepMs = MsSince(t0);
 
-        // Returned immediately upon transformation. The patches point directly 
-        // into the raw strip, so every millisecond held longer forces the producer to drop frames.
         (void)rawPool.try_push(raw);
-
         metrics.addPreprocessingTime(slot->prepMs);
 
-        // Blocking push: qPrep can legitimately hold fewer items than the slots in
-        // flight (Slots >= MinimumSlots > QueuePrepCapacity). A try_push would fail under
-        // normal backpressure and terminate this thread for good. It returns false only
-        // when the queue is stopped, i.e. on shutdown.
         if (!qPrep.push(slot)) {
             (void)slotPool.try_push(slot);
             break;

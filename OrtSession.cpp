@@ -368,9 +368,12 @@ void OrtSessionConfig::RunBatch(const float* input, float* scores, float* map, T
 	CudaCheck(cudaStreamSynchronize(stream_), "streamSynchronize");
 
 	float ms = 0.0f;
-	cudaEventElapsedTime(&ms, evStart_, evH2D_); t.h2dMs = ms;
-	cudaEventElapsedTime(&ms, evH2D_, evRun_);   t.runMs = ms;
-	cudaEventElapsedTime(&ms, evRun_, evD2H_);   t.d2hMs = ms;
+	cudaEventElapsedTime(&ms, evStart_, evH2D_); 
+	t.h2dMs = ms;
+	cudaEventElapsedTime(&ms, evH2D_, evRun_);   
+	t.runMs = ms;
+	cudaEventElapsedTime(&ms, evRun_, evD2H_);   
+	t.d2hMs = ms;
 }
 
 void OrtSessionConfig::Warmup(int runs)
