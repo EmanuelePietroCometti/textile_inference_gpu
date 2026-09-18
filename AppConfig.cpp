@@ -97,6 +97,10 @@ AppConfig AppConfig::LoadFromIni(const std::wstring& iniPath)
 
 void AppConfig::ValidateCrossConstraints() const
 {
+    if (geometry_.channels != 3) {
+        throw std::runtime_error("[Source] Channels = " + std::to_string(geometry_.channels)
+            + ": AntialiasResizer and preprocessing stages are strictly hardcoded for 3 channels.");
+    }
     // PatchLayout validates its own internal consistency during construction.
     // What remains here are cross-module constraints that no single module can evaluate alone.
     const PatchLayout layout(geometry_);
@@ -137,11 +141,6 @@ void AppConfig::ValidateCrossConstraints() const
         throw std::runtime_error("(PrepThreads + PostThreads) * OpenCvThreads + InferenceThreads + Ingest = "
             + std::to_string(demanded) + " workers demanded on only " + std::to_string(logical)
             + " logical processors: reduce OpenCvThreads or the stage threads to avoid CPU thrashing.");
-    }
-
-    if (geometry_.channels != 3) {
-        throw std::runtime_error("[Source] Channels = " + std::to_string(geometry_.channels)
-            + ": AntialiasResizer and preprocessing stages are strictly hardcoded for 3 channels.");
     }
 }
 

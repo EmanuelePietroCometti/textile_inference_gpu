@@ -117,7 +117,13 @@
       <DelayLoadDLLs>onnxruntime.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /Y /D "$(ProjectDir)iniConfigFile_onnxInference.ini" "$(OutDir)"</Command>
+      <Command>xcopy /Y /D "$(ProjectDir)iniConfigFile_onnxInference.ini" "$(OutDir)."
+xcopy /Y /D "$(SolutionDir)SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\lib\*.dll" "$(OutDir)."
+xcopy /Y /D "$(SolutionDir)SDK\TensorRT-10.16.1.11\bin\*.dll" "$(OutDir)."
+xcopy /Y /D "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin\x64\cudart64_13.dll" "$(OutDir)."
+xcopy /Y /D "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin\x64\cublas64_13.dll" "$(OutDir)."
+xcopy /Y /D "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin\x64\cublasLt64_13.dll" "$(OutDir)."
+xcopy /Y /D "$(SolutionDir)SDK\opencv\build\x64\vc16\bin\*d.dll" "$(OutDir)."</Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command>if exist "$(OutDir)TestData" rmdir /s /q "$(OutDir)TestData"
@@ -147,7 +153,13 @@ for %%f in ("$(OutDir)*.dll" "$(OutDir)*.exe" "$(OutDir)*.pdb" "$(OutDir)*.lib" 
       <DelayLoadDLLs>onnxruntime.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /Y /D "$(ProjectDir)iniConfigFile_onnxInference.ini" "$(OutDir)"</Command>
+      <Command>xcopy /Y /D "$(ProjectDir)iniConfigFile_onnxInference.ini" "$(OutDir)."
+xcopy /Y /D "$(SolutionDir)SDK\onnxruntime-win-x64-gpu_cuda13-1.29.0\lib\*.dll" "$(OutDir)."
+xcopy /Y /D "$(SolutionDir)SDK\TensorRT-10.16.1.11\bin\*.dll" "$(OutDir)."
+xcopy /Y /D "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin\x64\cudart64_13.dll" "$(OutDir)."
+xcopy /Y /D "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin\x64\cublas64_13.dll" "$(OutDir)."
+xcopy /Y /D "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin\x64\cublasLt64_13.dll" "$(OutDir)."
+xcopy /Y /D "$(SolutionDir)SDK\opencv\build\x64\vc16\bin\*.dll" "$(OutDir)."</Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command>if exist "$(OutDir)TestData" rmdir /s /q "$(OutDir)TestData"

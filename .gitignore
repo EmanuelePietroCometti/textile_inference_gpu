@@ -13,3 +13,6 @@ SDK/"*.user"
 /imports.txt
 /x64/Release
 /textile_.eb0249dd/x64/Release
+/models
+/trt_engine_cache
+/trt_timing_cache

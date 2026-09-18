@@ -215,6 +215,7 @@ int main(int argc, char** argv)
         ingest.join();
 
         qRaw.stop();
+        slotStore.Pool().stop();
         for (auto& t : prep) t.join();
 
         qPrep.stop();
@@ -223,7 +224,6 @@ int main(int argc, char** argv)
         qInf.stop();
         for (auto& t : post) t.join();
 
-        slotStore.Pool().stop();
         rawStore.Pool().stop();
 
         PrintMetrics(metrics, source, lastBatches);
