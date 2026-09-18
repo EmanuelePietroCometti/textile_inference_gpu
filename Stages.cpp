@@ -177,8 +177,11 @@ void PrepStage(const AppConfig& cfg,
 
         metrics.addPreprocessingTime(slot->prepMs);
 
-        // If pipeline is shutting down, return the slot to prevent leaks
-        if (!qPrep.try_push(slot)) {
+        // Blocking push: qPrep can legitimately hold fewer items than the slots in
+        // flight (Slots >= MinimumSlots > QueuePrepCapacity). A try_push would fail under
+        // normal backpressure and terminate this thread for good. It returns false only
+        // when the queue is stopped, i.e. on shutdown.
+        if (!qPrep.push(slot)) {
             (void)slotPool.try_push(slot);
             break;
         }
@@ -192,11 +195,6 @@ void InferStage(OrtSessionConfig& session,
     RingBuffer<PipelineSlot*>& slotPool,
     PerformanceMetrics& metrics)
 {
-    // Inference usually sits at the critical path; Real-Time elevation is highly recommended.
-    const DWORD err = RT::ConfigureRealtimeThread();
-    if (err != 0)
-        Log::Warning("prep: real-time priority not applied (GetLastError={})", err);
-
     for (;;) {
         PipelineSlot* slot = nullptr;
         if (!qPrep.pop(slot)) break;
@@ -220,7 +218,7 @@ void InferStage(OrtSessionConfig& session,
         metrics.addD2HTime(t.d2hMs);
         metrics.addGpuTime(t.h2dMs + t.runMs + t.d2hMs);
 
-        if (!qInf.try_push(slot)) {
+        if (!qInf.push(slot)) { // blocking, same reasoning as in PrepStage
             (void)slotPool.try_push(slot);
             break;
         }
@@ -235,10 +233,10 @@ void PostStage(const AppConfig& cfg,
     IResultSink& sink,
     PerformanceMetrics& metrics)
 {
-    if (cfg.PrepRealtime()) {
+    if (cfg.PostRealtime()) {
         const DWORD err = RT::ConfigureRealtimeThread();
         if (err != 0)
-            Log::Warning("prep: real-time priority not applied (GetLastError={})", err);
+            Log::Warning("post: real-time priority not applied (GetLastError={})", err);
     }
 
     const ContractMetadata& contract = session.Contract();
@@ -257,12 +255,8 @@ void PostStage(const AppConfig& cfg,
     const double alpha = 255.0 / span;
     const double beta = -255.0 * contract.MapMin() / span;
 
-    // Thread-local scratch buffers, allocated strictly once.
+    // Thread-local scratch buffer, allocated strictly once.
     cv::Mat scaled(mapH, mapW, CV_8UC1);
-    cv::Mat resized;
-    if (!cfg.MapAtModelResolution()) {
-        resized.create(outH, outW, CV_8UC1);
-    }
 
     for (;;) {
         PipelineSlot* slot = nullptr;

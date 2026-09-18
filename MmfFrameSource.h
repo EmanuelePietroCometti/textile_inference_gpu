@@ -11,6 +11,7 @@ enum class FrameStatus {
     Ok,               ///< The frame was successfully read and pushed to the processing queue.
     TimeOut,          ///< The wait operation timed out before a new frame was signaled.
     Stopped,          ///< The source was explicitly stopped, interrupting the read attempt.
+    Dropped,          ///< A frame was available but the raw pool was empty: frame discarded, MMF released.
     GeometryMismatch  ///< The incoming frame dimensions in the MMF do not match the expected PatchLayout.
 };
 
@@ -59,10 +60,22 @@ public:
     FrameStatus ReadFrame(std::uint32_t timeoutMs);
 
     /**
+     * @brief Re-arms the source after a Stop(), so that ReadFrame() accepts frames again.
+     *
+     * @details Any frame the producer left in the MMF while nobody was listening is
+     * discarded (canRead reset to FALSE) and the ready event is cleared: the first frame
+     * processed after Start() is always one written after Start().
+     * Must NOT be called while another thread is inside ReadFrame().
+     */
+    void Start();
+
+    /**
      * @brief Signals the internal threads to halt operations.
      *
-     * @details Sets the internal stop flag and forces any pending `WaitForSingleObject`
-     * inside `ReadFrame` to unblock immediately, ensuring a clean and fast shutdown.
+     * @details Sets the internal stop flag and signals the ready event, so a pending
+     * `WaitForSingleObject` inside `ReadFrame` returns immediately instead of waiting
+     * for the timeout. The spurious signal is harmless: ReadFrame trusts `canRead`,
+     * not the event, and Start() clears the event.
      */
     void Stop();
 
