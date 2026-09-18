@@ -2,10 +2,85 @@
 //
 
 #include <iostream>
+#include "AsyncLogger.h"
+#include "IniConfig.h"
+#include "fmt/core.h"
+#include "fmt/color.h"
+#include <windows.h>
+
+
+// Configuration parameters
+const std::wstring iniPath = L"iniConfigFile_onnxInference.ini";
+
+namespace ConfigKeys {
+    namespace Section {
+        constexpr const wchar_t* Logger = L"Logger";
+    }
+
+    namespace Field {
+        constexpr const wchar_t* MaxMessageChars = L"maxMessageChars";
+        constexpr const wchar_t* QueueCapacity = L"queueCapacity";
+        constexpr const wchar_t* FlushIntervalMs = L"flushIntervalMs";
+        constexpr const wchar_t* NotifyThreshold = L"notifyThreshold";
+    }
+}
+
+bool verifyColorSupport()
+{
+	bool s_ansiColorSupported = true;
+	for (DWORD stdHandle : { STD_OUTPUT_HANDLE, STD_ERROR_HANDLE }) {
+		HANDLE h = GetStdHandle(stdHandle);
+		DWORD mode = 0;
+		if (h == NULL || h == INVALID_HANDLE_VALUE || !GetConsoleMode(h, &mode)) {
+			s_ansiColorSupported = false;
+			continue;
+		}
+		if (!SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
+			s_ansiColorSupported = false;
+		}
+	}
+	return s_ansiColorSupported;
+}
+
+
+void preprocessingWorker()
+{
+
+}
+
+void inferenceWorker()
+{
+
+}
+
+void postprocessingWorker()
+{
+
+}
+
 
 int main()
 {
-    std::cout << "Hello World!\n";
+    IniConfig cfg;
+    bool cfgFound = cfg.Load(iniPath);
+    if (cfgFound)
+    {
+        fmt::print(verifyColorSupport() ? fg(fmt::color::yellow) : fmt::text_style{},
+            "[ERROR] Ini configuration file did not found! \n");
+        return -1;
+    }
+
+    long maxMessageChars = cfg.GetInt(ConfigKeys::Section::Logger, ConfigKeys::Field::MaxMessageChars, 480L);
+    long queueCapacity = cfg.GetInt(ConfigKeys::Section::Logger, ConfigKeys::Field::QueueCapacity, 4096L);
+    long flushIntervalMs = cfg.GetInt(ConfigKeys::Section::Logger, ConfigKeys::Field::FlushIntervalMs, 200L);
+    long notifyThreshold = cfg.GetInt(ConfigKeys::Section::Logger, ConfigKeys::Field::NotifyThreshold, 1024L);
+
+    AsyncLogger logger(maxMessageChars, queueCapacity, flushIntervalMs, notifyThreshold);
+
+    Log::Info("ONNX inference program started!");
+
+
+
 }
 
 // Per eseguire il programma: CTRL+F5 oppure Debug > Avvia senza eseguire debug
