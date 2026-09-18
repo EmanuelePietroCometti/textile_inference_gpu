@@ -11,3 +11,5 @@ SDK/"*.user"
 "*.vcxproj.user" 
 "SDK/" 
 /imports.txt
+/x64/Release
+/textile_.eb0249dd/x64/Release
