@@ -8,9 +8,11 @@
 #endif
 #include <Windows.h>
 
+#include <climits>
 #include <stdexcept>
 #include <thread>
 
+#include "RealTimeConfig.h"
 #include "SharedFrameContract.h"
 
 namespace {
@@ -29,6 +31,16 @@ namespace {
     bool Flag(const IniConfig& ini, const wchar_t* section, const wchar_t* key, long fallback)
     {
         return ini.GetInt(section, key, fallback) != 0;
+    }
+
+    int ThreadPriority(const IniConfig& ini, const wchar_t* key, int fallback, const char* label)
+    {
+        const long v = ini.GetInt(L"RealTime", key, fallback);
+        if (!RT::IsValidThreadPriority(static_cast<int>(v))) {
+            throw std::runtime_error(std::string(label) + " = " + std::to_string(v)
+                + ": expected a THREAD_PRIORITY_* level (-15, -2, -1, 0, 1, 2, 15)");
+        }
+        return static_cast<int>(v);
     }
 
 } // namespace
@@ -66,7 +78,7 @@ AppConfig AppConfig::LoadFromIni(const std::wstring& iniPath)
     cfg.prepThreads_ = U32(ini, L"Pipeline", L"PrepThreads", 1, 1, 64, "[Pipeline] PrepThreads");
     cfg.inferThreads_ = U32(ini, L"Pipeline", L"InferenceThreads", 1, 1, 4, "[Pipeline] InferenceThreads");
     cfg.postThreads_ = U32(ini, L"Pipeline", L"PostThreads", 1, 1, 64, "[Pipeline] PostThreads");
-    cfg.openCvThreads_ = U32(ini, L"Pipeline", L"OpenCvThreads", 1, 1, 64, "[Pipeline] OpenCvThreads");
+    cfg.openCvThreads_ = U32(ini, L"Pipeline", L"OpenCvThreads", 0, 0, 64, "[Pipeline] OpenCvThreads");
     cfg.readTimeoutMs_ = U32(ini, L"Pipeline", L"ReadTimeoutMs", 100, 1, 60000, "[Pipeline] ReadTimeoutMs");
 
     // 0 = computed from minimum: this is the recommended default.
@@ -78,10 +90,20 @@ AppConfig AppConfig::LoadFromIni(const std::wstring& iniPath)
     cfg.mapAtModelRes_ = Flag(ini, L"Output", L"MapAtModelResolution", 1);
     cfg.drawMask_ = Flag(ini, L"Output", L"DrawMask", 0);
 
+    cfg.resizeAntialias_ = Flag(ini, L"Preprocessing", L"ResizeAntialias", 1);
+
     cfg.elevateProcess_ = Flag(ini, L"RealTime", L"ElevateProcess", 1);
-    cfg.prepRealtime_ = Flag(ini, L"RealTime", L"PrepRealtime", 1);
-    cfg.inferRealtime_ = Flag(ini, L"RealTime", L"InferenceRealtime", 1);
-    cfg.postRealtime_ = Flag(ini, L"RealTime", L"PostRealtime", 0);
+
+    // The old boolean keys would otherwise be ignored without a word.
+    for (const wchar_t* legacy : { L"PrepRealtime", L"InferenceRealtime", L"PostRealtime" }) {
+        if (ini.GetInt(L"RealTime", legacy, LONG_MIN) != LONG_MIN)
+            throw std::runtime_error("[RealTime] PrepRealtime/InferenceRealtime/PostRealtime were "
+                "replaced by IngestPriority/InferencePriority/PrepPriority/PostPriority: update the INI.");
+    }
+    cfg.ingestPriority_ = ThreadPriority(ini, L"IngestPriority", THREAD_PRIORITY_TIME_CRITICAL, "[RealTime] IngestPriority");
+    cfg.inferPriority_ = ThreadPriority(ini, L"InferencePriority", THREAD_PRIORITY_HIGHEST, "[RealTime] InferencePriority");
+    cfg.prepPriority_ = ThreadPriority(ini, L"PrepPriority", THREAD_PRIORITY_ABOVE_NORMAL, "[RealTime] PrepPriority");
+    cfg.postPriority_ = ThreadPriority(ini, L"PostPriority", THREAD_PRIORITY_NORMAL, "[RealTime] PostPriority");
 
     cfg.logMaxChars_ = U32(ini, L"Logger", L"maxMessageChars", 480, 32, 8192, "[Logger] maxMessageChars");
     cfg.logQueueCap_ = U32(ini, L"Logger", L"queueCapacity", 4096, 8, 1 << 20, "[Logger] queueCapacity");
@@ -99,7 +121,7 @@ void AppConfig::ValidateCrossConstraints() const
 {
     if (geometry_.channels != 3) {
         throw std::runtime_error("[Source] Channels = " + std::to_string(geometry_.channels)
-            + ": AntialiasResizer and preprocessing stages are strictly hardcoded for 3 channels.");
+            + ": the preprocessing stage is strictly hardcoded for 3 channels.");
     }
     // PatchLayout validates its own internal consistency during construction.
     // What remains here are cross-module constraints that no single module can evaluate alone.
@@ -135,7 +157,8 @@ void AppConfig::ValidateCrossConstraints() const
     // Therefore, the required thread counts MULTIPLY, they don't just add up.
     // This is the most common cause of OS context-switch jitter in this architecture.
     const unsigned logical = std::thread::hardware_concurrency();
-    const std::uint32_t demanded = (prepThreads_ + postThreads_) * openCvThreads_ + inferThreads_ + 1;
+    const std::uint32_t perStage = openCvThreads_ == 0 ? 1u : openCvThreads_;
+    const std::uint32_t demanded = (prepThreads_ + postThreads_) * perStage + inferThreads_ + 1;
 
     if (logical > 0 && demanded > logical) {
         throw std::runtime_error("(PrepThreads + PostThreads) * OpenCvThreads + InferenceThreads + Ingest = "
@@ -146,7 +169,7 @@ void AppConfig::ValidateCrossConstraints() const
 
 std::string AppConfig::Describe() const
 {
-    return "Config | " + model_.Describe() + "\n"
+    return model_.Describe() + "\n"   // already starts with "Config | "
         + "Config | strip " + std::to_string(geometry_.stripWidth) + "x"
         + std::to_string(geometry_.stripHeight) + "x" + std::to_string(geometry_.channels)
         + " | " + std::to_string(geometry_.count) + " patches of "
@@ -159,8 +182,10 @@ std::string AppConfig::Describe() const
         + "/" + std::to_string(postThreads_) + " opencv=" + std::to_string(openCvThreads_) + "\n"
         + "Config | map=" + (mapAtModelRes_ ? "model" : "patch")
         + " mask=" + (drawMask_ ? "1" : "0")
+        + " resize=" + (resizeAntialias_ ? "antialias" : "box")
         + " | realtime proc=" + (elevateProcess_ ? "1" : "0")
-        + " prep=" + (prepRealtime_ ? "1" : "0")
-        + " inf=" + (inferRealtime_ ? "1" : "0")
-        + " post=" + (postRealtime_ ? "1" : "0");
+        + " prio ingest=" + std::to_string(ingestPriority_)
+        + " infer=" + std::to_string(inferPriority_)
+        + " prep=" + std::to_string(prepPriority_)
+        + " post=" + std::to_string(postPriority_);
 }

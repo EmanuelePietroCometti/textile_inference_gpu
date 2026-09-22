@@ -159,8 +159,12 @@ private:
      */
     void RunAllBound();
 
+    /** @brief Body of RunBatch; RunBatch adds the stream drain on the error path. */
+    void RunBatchImpl(const float* input, float* scores, float* map, Timings& t);
+
     Ort::Session session_;         ///< The core ONNX Runtime session.
     Ort::IoBinding binding_;       ///< Handles optimal memory transfers and static device pointer binding.
+    Ort::RunOptions runOptions_;   ///< Built once: Run() does not synchronize the stream, RunBatch does.
     Ort::MemoryInfo deviceMemInfo_;///< Memory allocation specification for the execution provider.
     ContractMetadata contract_;    ///< Custom metadata extracted from the ONNX model.
 

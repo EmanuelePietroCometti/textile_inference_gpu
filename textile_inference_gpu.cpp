@@ -17,6 +17,7 @@
 #include <thread>
 #include <vector>
 
+#include <cuda_runtime.h>
 #include <opencv2/core.hpp>
 
 #include "AppConfig.h"
@@ -120,8 +121,8 @@ namespace {
      */
     class IngestController {
     public:
-        IngestController(MmfFrameSource& source, std::uint32_t readTimeoutMs)
-            : source_(source), readTimeoutMs_(readTimeoutMs) {
+        IngestController(MmfFrameSource& source, std::uint32_t readTimeoutMs, int priority)
+            : source_(source), readTimeoutMs_(readTimeoutMs), priority_(priority) {
         }
 
         ~IngestController() { Stop(); }
@@ -141,9 +142,8 @@ namespace {
             source_.Start();
             alive_.store(true, std::memory_order_release);
             thread_ = std::thread([this] {
-                const DWORD err = RT::ConfigureRealtimeThread();
-                if (err != 0)
-                    Log::Warning("ingest: real-time priority not applied (GetLastError={})", err);
+                if (const DWORD err = RT::ConfigureThread(priority_); err != 0)
+                    Log::Warning("ingest: thread priority {} not applied (GetLastError={})", priority_, err);
 
                 while (source_.ReadFrame(readTimeoutMs_) != FrameStatus::Stopped) {}
 
@@ -161,6 +161,7 @@ namespace {
     private:
         MmfFrameSource& source_;
         const std::uint32_t readTimeoutMs_;
+        const int priority_;
         std::thread thread_;
         std::atomic<bool> alive_{ false };
     };
@@ -250,6 +251,26 @@ namespace {
         // Prep and Post threads execute cv::parallel_for_ internally: the counts multiply.
         cv::setNumThreads(static_cast<int>(cfg.OpenCvThreads()));
 
+        // CUDA host-wait policy. Must run before any allocation that touches the context
+        // (pinned stores, sessions). With the default policy (cudaDeviceScheduleAuto, one
+        // context, many cores) every cudaStreamSynchronize SPINS: the inference threads,
+        // at TIME_CRITICAL, would burn a core each for the whole GPU run, stealing it from
+        // prep, post and the producer process. BlockingSync makes our waits and the ones
+        // inside ORT/TensorRT sleep on an OS event; the wake-up costs microseconds against
+        // a batch of tens of milliseconds.
+        {
+            const int dev = cfg.Model().DeviceId();
+            if (const cudaError_t e = cudaSetDevice(dev); e != cudaSuccess)
+                throw std::runtime_error(std::string("cudaSetDevice failed: ") + cudaGetErrorString(e));
+            if (const cudaError_t e = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync); e != cudaSuccess)
+                Log::Warning("cudaSetDeviceFlags(BlockingSync) failed: {}. Host waits will spin.",
+                    cudaGetErrorString(e));
+            unsigned int flags = 0;
+            cudaGetDeviceFlags(&flags);
+            Log::Info("CUDA device {} | flags 0x{:x} | blocking sync {}", dev, flags,
+                (flags & cudaDeviceScheduleMask) == cudaDeviceScheduleBlockingSync ? "ON" : "OFF");
+        }
+
         // Bottom-Up Architecture Initialization
         const PatchLayout layout(cfg.Geometry());
 
@@ -271,12 +292,8 @@ namespace {
             ? static_cast<std::size_t>(proto.MapHeight()) * proto.MapWidth()
             : static_cast<std::size_t>(cfg.Geometry().patchHeight) * cfg.Geometry().stripWidth;
 
-        SlotStore slotStore(proto, cfg.Slots(), outMapElems, cfg.DrawMask());
-
-        RingBuffer<PipelineSlot*> qPrep(cfg.QPrepCapacity());
-        RingBuffer<PipelineSlot*> qInf(cfg.QInfCapacity());
-
-        // Cross-module validation: A check no single module can perform alone.
+        // Cross-module validation: checks no single module can perform alone.
+        // Done BEFORE SlotStore, so a mismatch does not pin hundreds of MiB just to throw.
         if (proto.ModelChannels() != static_cast<int>(cfg.Geometry().channels)) {
             throw std::runtime_error("Channel mismatch: IPC source provides "
                 + std::to_string(cfg.Geometry().channels) + ", but model expects "
@@ -286,6 +303,30 @@ namespace {
             throw std::runtime_error("Model batch size (" + std::to_string(proto.BatchSize())
                 + ") differs from required patch count (" + std::to_string(cfg.Geometry().count) + ")");
         }
+        // PrepStage supports two geometries only: native (model == patch) and the fused
+        // exact 2x downscale (model == patch / 2). Anything else needs a general resampler.
+        {
+            const int ph = static_cast<int>(cfg.Geometry().patchHeight);
+            const int pw = static_cast<int>(cfg.Geometry().stripWidth);
+            const int mh = proto.ModelHeight();
+            const int mw = proto.ModelWidth();
+            const bool native = (mh == ph && mw == pw);
+            const bool half = (2 * mh == ph && 2 * mw == pw);
+            if (!native && !half) {
+                throw std::runtime_error("Model input " + std::to_string(mh) + "x" + std::to_string(mw)
+                    + " vs patch " + std::to_string(ph) + "x" + std::to_string(pw)
+                    + ": supported ratios are 1:1 and 2:1");
+            }
+            Log::Info("Preprocessing: patch {}x{} -> model {}x{} | {}", ph, pw, mh, mw,
+                native ? "no resize"
+                : (cfg.ResizeAntialias() ? "2x antialias (triangle, = old AntialiasResizer)"
+                    : "2x box (= cv::resize INTER_LINEAR)"));
+        }
+
+        SlotStore slotStore(proto, cfg.Slots(), outMapElems, cfg.DrawMask());
+
+        RingBuffer<PipelineSlot*> qPrep(cfg.QPrepCapacity());
+        RingBuffer<PipelineSlot*> qInf(cfg.QInfCapacity());
 
         PerformanceMetrics metrics(cfg.MetricsWindow(), proto.BatchSize());
         LoggingResultSink sink;
@@ -315,12 +356,11 @@ namespace {
             // Captures by reference are safe: everything referenced is declared before
             // `workers`, which joins this thread before any of it is destroyed.
             workers.infer.emplace_back([&, i] {
-            // Inference sits on the critical path: real-time elevation recommended.
-            if (cfg.InferenceRealtime()) {
-                const DWORD err = RT::ConfigureRealtimeThread();
-                if (err != 0)
-                    Log::Warning("infer: real-time priority not applied (GetLastError={})", err);
-                }
+                // Mostly asleep on the GPU (blocking sync): short CPU bursts to enqueue
+                // work, which must preempt prep/post so the GPU never waits for the host.
+                if (const DWORD err = RT::ConfigureThread(cfg.InferencePriority()); err != 0)
+                    Log::Warning("infer: thread priority {} not applied (GetLastError={})",
+                        cfg.InferencePriority(), err);
                 InferStage(*sessions[i], qPrep, qInf, slotStore.Pool(), metrics);
             });
         }
@@ -331,20 +371,23 @@ namespace {
         }
 
         // Declared last => destroyed first: the ingest thread stops before anything else.
-        IngestController ingest(source, cfg.ReadTimeoutMs());
+        IngestController ingest(source, cfg.ReadTimeoutMs(), cfg.IngestPriority());
 
         Log::Info("Pipeline ready: {} Prep, {} Infer, {} Post threads.",
             cfg.PrepThreads(), cfg.InferenceThreads(), cfg.PostThreads());
         Log::Info("Commands: [s] start listening on MMF | [x] stop listening | [q] quit");
 
         // Main Thread: keyboard + telemetry loop.
-        // The key poll timeout (100 ms) replaces the old sleep and sets the telemetry granularity.
+        // Poll() BLOCKS on the console handle for up to kPollMs: zero CPU while idle, and
+        // kPollMs is the telemetry granularity. With a 0 timeout this loop spun a whole
+        // core forever, at base priority 24 under REALTIME_PRIORITY_CLASS.
+        constexpr DWORD kPollMs = 100;
         const auto printEvery = std::chrono::milliseconds(cfg.MetricsPrintEveryMs());
         std::uint64_t lastBatches = 0;
         auto nextPrint = std::chrono::steady_clock::now();
         bool quit = false;
-        while(!quit) {
-            switch (keys.Poll(0)) {
+        while (!quit) {
+            switch (keys.Poll(kPollMs)) {
             case L's':
                 if (ingest.Listening()) {
                     Log::Info("Already listening on the MMF");

@@ -22,19 +22,19 @@
  * of any stage (e.g., 4 Prep threads, 2 Infer threads) based on application configuration
  * to perfectly saturate the CPU and GPU.
  *
- * **Zero-Allocation Hot Path:** Scratch buffers (like resizing matrices or intermediate
- * float buffers) are allocated EXACTLY ONCE at the top of the function, before entering
- * the `while` loop. They are reused for the entire lifetime of the thread.
+ * **Zero-Allocation Hot Path:** Every buffer touched per batch is pre-allocated at startup
+ * (pinned slots, pinned raw frames, per-thread scratch created before the loop). Nothing
+ * inside the loops allocates.
  */
 
  /**
   * @brief Executes the Preprocessing stage: converts raw image patches into NCHW floating-point blobs.
   *
-  * @details For every patch in the `RawFrame`, this stage performs:
-  * 1. Resizing (using the precomputed `AntialiasResizer`). This is a zero-cost identity
-  *    passthrough if the patch and model dimensions match (the resizer safely aliases the source).
-  * 2. Fused conversion from interleaved BGR to planar Float (NCHW), applying the scale and
-  *    offset bounds defined by the model's `ContractMetadata`.
+  * @details For every patch in the `RawFrame`, this stage converts interleaved 8-bit BGR to
+  * planar float (NCHW) with the per-channel scale and offset of the model's `ContractMetadata`.
+  * If the model input is half the patch size, an exact 2x downscale (antialiased triangle
+  * filter or 2x2 average, see [Preprocessing] ResizeAntialias) is fused into the same pass.
+  * Any other size ratio is rejected at startup.
   *
   * **Lifecycle Note:** The `RawFrame` is released back to its pool the instant the transformation
   * finishes. This keeps the hold time on the camera/IPC buffers as short as possible, preventing

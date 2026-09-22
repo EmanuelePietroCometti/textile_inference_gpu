@@ -76,6 +76,24 @@ namespace RT {
     [[nodiscard]] DWORD ConfigureRealtimeThread();
 
     /**
+     * @brief Sets the calling thread to an explicit Windows priority level.
+     *
+     * @details The effective base priority is class + level: under REALTIME_PRIORITY_CLASS
+     * 15 -> 31, 2 -> 26, 1 -> 25, 0 -> 24, -1 -> 23, -2 -> 22, -15 -> 16; under
+     * HIGH_PRIORITY_CLASS 15 -> 15, 2 -> 15, 1 -> 14, 0 -> 13, -1 -> 12, -2 -> 11, -15 -> 1.
+     *
+     * @param priority One of the THREAD_PRIORITY_* levels (see IsValidThreadPriority).
+     * @return `0` on success, otherwise the code from `GetLastError()`.
+     */
+    [[nodiscard]] DWORD ConfigureThread(int priority);
+
+    /**
+     * @brief True for the THREAD_PRIORITY_* levels valid in every priority class:
+     * -15 (IDLE), -2, -1, 0, 1, 2, 15 (TIME_CRITICAL).
+     */
+    [[nodiscard]] bool IsValidThreadPriority(int priority) noexcept;
+
+    /**
      * @brief Applies a specific priority class to the current thread or process.
      *
      * @details Allows fine-grained, manual control over the Windows scheduler priority classes

@@ -66,8 +66,9 @@ public:
 
     /**
      * @brief Number of internal threads OpenCV is allowed to spawn.
-     * @details Used to invoke `cv::setNumThreads()` globally. Set to 1 to prevent OpenCV from
-     * thrashing the CPU when you already have a highly parallelized pipeline.
+     * @details Used to invoke `cv::setNumThreads()` globally. 0 = OpenCV runs every function
+     * sequentially in the calling thread (recommended: the stage threads already parallelize,
+     * and OpenCV pool threads do not inherit the stage thread priority).
      */
     std::uint32_t OpenCvThreads() const { return openCvThreads_; }
 
@@ -82,20 +83,34 @@ public:
     /** @brief If true, the post-processing stage allocates and generates binary threshold masks. */
     bool DrawMask() const { return drawMask_; }
 
-    // [RealTime]
-    // These flags control Windows API scheduling priorities to minimize jitter.
+    // [Preprocessing]
 
-    /** @brief If true, elevates the entire process priority class (e.g., HIGH_PRIORITY_CLASS). */
+    /**
+     * @brief Filter of the fused 2x downscale (used only when model input == patch / 2).
+     * @details true = triangle filter (PIL / torchvision antialias=True, bit-exact with the
+     * old AntialiasResizer); false = 2x2 average (bit-exact with cv::resize INTER_LINEAR).
+     * Must match the resize used at training time.
+     */
+    bool ResizeAntialias() const { return resizeAntialias_; }
+
+    // [RealTime]
+    // Windows scheduling. Thread priorities are THREAD_PRIORITY_* levels; their ORDER
+    // encodes who must preempt whom (see the INI for the rationale).
+
+    /** @brief If true, elevates the process priority class (REALTIME, falling back to HIGH). */
     bool ElevateProcess() const { return elevateProcess_; }
 
-    /** @brief If true, elevates PrepStage threads to Time Critical priority. */
-    bool PrepRealtime() const { return prepRealtime_; }
+    /** @brief Priority of the MMF ingest thread (default TIME_CRITICAL). */
+    int IngestPriority() const { return ingestPriority_; }
 
-    /** @brief If true, elevates InferStage threads to Time Critical priority. */
-    bool InferenceRealtime() const { return inferRealtime_; }
+    /** @brief Priority of the InferStage threads (default HIGHEST). */
+    int InferencePriority() const { return inferPriority_; }
 
-    /** @brief If true, elevates PostStage threads to Time Critical priority. */
-    bool PostRealtime() const { return postRealtime_; }
+    /** @brief Priority of the PrepStage threads (default ABOVE_NORMAL). */
+    int PrepPriority() const { return prepPriority_; }
+
+    /** @brief Priority of the PostStage threads (default NORMAL). */
+    int PostPriority() const { return postPriority_; }
 
     // [Logger]
 
@@ -151,7 +166,9 @@ private:
     std::uint32_t readTimeoutMs_ = 100;
 
     bool mapAtModelRes_ = true, drawMask_ = false;
-    bool elevateProcess_ = true, prepRealtime_ = true, inferRealtime_ = true, postRealtime_ = false;
+    bool resizeAntialias_ = true;
+    bool elevateProcess_ = true;
+    int ingestPriority_ = 15, inferPriority_ = 2, prepPriority_ = 1, postPriority_ = 0;
 
     std::uint32_t logMaxChars_ = 480, logQueueCap_ = 4096, logFlushMs_ = 200, logNotify_ = 1024;
     std::uint32_t metricsWindow_ = 100, metricsPrintMs_ = 2000;

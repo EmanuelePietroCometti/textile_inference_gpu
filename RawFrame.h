@@ -25,9 +25,13 @@ struct RawFrame {
  * @brief Pre-allocated memory pool managing a fixed number of `RawFrame` instances.
  *
  * @details This class is the core memory manager for the image acquisition pipeline.
- * It pre-allocates all required heap memory for the image strips and `cv::Mat` headers
- * during initialization. By distributing `RawFrame*` pointers via a thread-safe `RingBuffer`,
- * it guarantees a completely allocation-free (zero-alloc) hot path during real-time camera capture.
+ * It pre-allocates all image strips and `cv::Mat` headers during initialization. The strips
+ * are CUDA pinned (page-locked) memory: they can never be trimmed from the working set, so
+ * the ingest memcpy never page-faults, and they are a valid source for a full-bandwidth
+ * asynchronous H2D copy. By distributing `RawFrame*` pointers via a thread-safe `RingBuffer`,
+ * it guarantees a completely allocation-free (zero-alloc) hot path during real-time capture.
+ *
+ * Not write-combined: the preprocessing stage READS the strips on the CPU.
  */
 class RawFrameStore {
 public:
@@ -84,8 +88,11 @@ public:
     const PatchLayout& Layout() const;
 
 private:
-    PatchLayout layout_;                                     ///< Copy of the layout configuration used for pointer arithmetic.
-    std::vector<std::unique_ptr<std::uint8_t[]>> storage_;   ///< RAII containers holding the actual huge contiguous heap allocations.
-    std::vector<RawFrame> frames_;                           ///< Stable storage for the frame objects themselves.
-    RingBuffer<RawFrame*> pool_;                             ///< Thread-safe circular queue holding pointers to available, recyclable frames.
+    /** @brief Releases every pinned strip (constructor rollback and destructor). */
+    void Release() noexcept;
+
+    PatchLayout layout_;                ///< Copy of the layout configuration used for pointer arithmetic.
+    std::vector<void*> pinned_;         ///< cudaHostAlloc blocks, one per strip, released with cudaFreeHost.
+    std::vector<RawFrame> frames_;      ///< Stable storage for the frame objects themselves.
+    RingBuffer<RawFrame*> pool_;        ///< Thread-safe circular queue holding pointers to available, recyclable frames.
 };

@@ -5,6 +5,21 @@
 
 RealTimeScope::RealTimeScope()
 {
+	// Opt out of EcoQoS / power throttling. Otherwise Windows may run the process at
+	// reduced clock or on efficiency cores (hybrid CPUs, battery, window not in focus) and,
+	// on Windows 11, ignore timeBeginPeriod while the console window is not visible.
+	// Control bit set + state bit clear = throttling explicitly disabled.
+	PROCESS_POWER_THROTTLING_STATE throttling{};
+	throttling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+	throttling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+#ifdef PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION
+	throttling.ControlMask |= PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+#endif
+	throttling.StateMask = 0;
+	if (!SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling,
+		&throttling, sizeof(throttling)))
+		Log::Warning("[RT] Power throttling opt-out failed (error: {}).", GetLastError());
+
 	previousClass = GetPriorityClass(GetCurrentProcess());
 	if (previousClass == 0)
 		Log::Warning("[RT] GetPriorityClass failed (error: {}); no restore on exit.", GetLastError());
@@ -68,8 +83,29 @@ DWORD RT::ConfigureBackgroundThread()
 
 DWORD RT::ConfigureRealtimeThread()
 {
-	if (SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL)) return 0;
+	return ConfigureThread(THREAD_PRIORITY_TIME_CRITICAL);
+}
+
+DWORD RT::ConfigureThread(int priority)
+{
+	if (SetThreadPriority(GetCurrentThread(), priority)) return 0;
 	return GetLastError();
+}
+
+bool RT::IsValidThreadPriority(int priority) noexcept
+{
+	switch (priority) {
+	case THREAD_PRIORITY_IDLE:
+	case THREAD_PRIORITY_LOWEST:
+	case THREAD_PRIORITY_BELOW_NORMAL:
+	case THREAD_PRIORITY_NORMAL:
+	case THREAD_PRIORITY_ABOVE_NORMAL:
+	case THREAD_PRIORITY_HIGHEST:
+	case THREAD_PRIORITY_TIME_CRITICAL:
+		return true;
+	default:
+		return false;
+	}
 }
 
 DWORD RT::ApplyPriorityClass(DWORD requested)

@@ -119,9 +119,16 @@ namespace {
 OrtSessionConfig::OrtSessionConfig(Ort::Env& env, const PipelineConfig& cfg)
 	: session_(nullptr),
 	binding_(nullptr),
+	runOptions_(),
 	deviceMemInfo_("Cuda", OrtDeviceAllocator, cfg.DeviceId(), OrtMemTypeDefault),
 	loopBatch1_(cfg.LoopBatch1())
 {
+	// By default every Run() ends with a stream synchronize inside the EP. H2D, Run and
+	// D2H are all on stream_, so a single synchronize at the end of RunBatch covers them:
+	// one host wait per batch instead of two, and no bubble between Run and the D2H.
+	// (Same value as kOrtRunOptionsConfigDisableSynchronizeExecutionProviders.)
+	runOptions_.AddConfigEntry("disable_synchronize_execution_providers", "1");
+
 	// This class allocates device buffers and binds tensors to CUDA memory:
 	// it does not have a CPU path. Better to state it immediately than fail later
 	// on a cudaMalloc without context.
@@ -322,8 +329,6 @@ void OrtSessionConfig::BuildTensors()
 
 void OrtSessionConfig::RunAllBound()
 {
-	const Ort::RunOptions runOptions{ nullptr };
-
 	if (loopBatch1_) {
 		// PatchCore and similar: the memory bank does not fit in VRAM with a full batch,
 		// hence batch_ executions of size 1. Tensors are already prepared: in the loop
@@ -334,15 +339,29 @@ void OrtSessionConfig::RunAllBound()
 			binding_.BindInput(inputName_.c_str(), inputTensors_[i]);
 			binding_.BindOutput(scoreName_.c_str(), scoreTensors_[i]);
 			binding_.BindOutput(mapName_.c_str(), mapTensors_[i]);
-			session_.Run(runOptions, binding_);
+			session_.Run(runOptions_, binding_);
 		}
 	}
 	else {
-		session_.Run(runOptions, binding_);
+		session_.Run(runOptions_, binding_);
 	}
 }
 
 void OrtSessionConfig::RunBatch(const float* input, float* scores, float* map, Timings& t)
+{
+	try {
+		RunBatchImpl(input, scores, map, t);
+	}
+	catch (...) {
+		// The caller returns the slot to the pool on failure: make sure no DMA already
+		// enqueued on stream_ is still reading `input` or writing `scores`/`map` when prep
+		// reuses the same pinned buffers. Best effort: the error may itself be sticky.
+		(void)cudaStreamSynchronize(stream_);
+		throw;
+	}
+}
+
+void OrtSessionConfig::RunBatchImpl(const float* input, float* scores, float* map, Timings& t)
 {
 	CudaCheck(cudaEventRecord(evStart_, stream_), "eventRecord(start)");
 
