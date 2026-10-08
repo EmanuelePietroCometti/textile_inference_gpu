@@ -16,3 +16,4 @@ SDK/"*.user"
 /models
 /trt_engine_cache
 /trt_timing_cache
+/.vs
