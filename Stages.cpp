@@ -559,7 +559,6 @@ void PostStage(const AppConfig& cfg,
         sink.Publish(result); // Raw pointers inside `result` are only valid during this call
 
         slot->postMs = MsSince(t0);
-        metrics.addPostprocessingTime(slot->postMs); // Internally increments completedBatches counter
-		metrics.printRollingAverage(result.seq);
+		metrics.printRollingAverage(metrics.addPostprocessingTime(slot->postMs));
     }
 }

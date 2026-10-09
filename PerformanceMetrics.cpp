@@ -55,7 +55,7 @@ void PerformanceMetrics::printRollingAverage(std::int64_t batchIndex) const
 
 	Log::Info("[MONITOR] Batch {}-{} | per-batch(ms) CPU:{:.2f} | "
 		"GPUwall:{:.2f} = H2D:{:.3f}+Run:{:.3f}+D2H:{:.3f} | Out:{:.2f}",
-		batchIndex + 1, batchIndex + windowDimension,
+		batchIndex - windowDimension + 1, batchIndex,
 		preprocessing.average(), gpu.average(),
 		h2d.average(), run.average(), d2h.average(), postprocessing.average());
 }
