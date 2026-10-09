@@ -63,6 +63,15 @@
     <ClCompile Include="AppConfig.cpp">
       <Filter>File di origine</Filter>
     </ClCompile>
+    <ClCompile Include="ConsoleKeys.cpp">
+      <Filter>File di origine</Filter>
+    </ClCompile>
+    <ClCompile Include="IngestController.cpp">
+      <Filter>File di origine</Filter>
+    </ClCompile>
+    <ClCompile Include="StageWorkers.cpp">
+      <Filter>File di origine</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="RingBuffer.h">
@@ -120,6 +129,15 @@
       <Filter>File di intestazione</Filter>
     </ClInclude>
     <ClInclude Include="ResultSink.h">
+      <Filter>File di intestazione</Filter>
+    </ClInclude>
+    <ClInclude Include="ConsoleKeys.h">
+      <Filter>File di intestazione</Filter>
+    </ClInclude>
+    <ClInclude Include="IngestController.h">
+      <Filter>File di intestazione</Filter>
+    </ClInclude>
+    <ClInclude Include="StageWorkers.h">
       <Filter>File di intestazione</Filter>
     </ClInclude>
   </ItemGroup>

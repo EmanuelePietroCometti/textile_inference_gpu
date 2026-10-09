@@ -22,6 +22,8 @@
 
 #include "AppConfig.h"
 #include "AsyncLogger.h"
+#include "ConsoleKeys.h"
+#include "IngestController.h"
 #include "MmfFrameSource.h"
 #include "OrtSession.h"
 #include "PatchLayout.h"
@@ -32,6 +34,7 @@
 #include "ResultSink.h"
 #include "RingBuffer.h"
 #include "Stages.h"
+#include "StageWorkers.h"
 
 namespace {
 
@@ -48,180 +51,6 @@ namespace {
         GetModuleFileNameW(nullptr, buffer, MAX_PATH);
         return std::filesystem::path(buffer).parent_path() / L"iniConfigFile_onnxInference.ini";
     }
-
-    void PrintMetrics(const PerformanceMetrics& metrics,
-        const MmfFrameSource& source, std::uint64_t lastBatches)
-    {
-        const auto s = metrics.snapshot();
-        const double total = s.preprocessing + s.gpu + s.postprocessing;
-
-        Log::Info("Metrics | batch {} | prep {:.2f} | h2d {:.2f} run {:.2f} d2h {:.2f} | post {:.2f} | total {:.2f} ms | read {} dropped {}",
-            static_cast<std::uint64_t>(s.completedBatches) - lastBatches,
-            s.preprocessing, s.h2d, s.run, s.d2h, s.postprocessing, total,
-            source.FramesRead(), source.DroppedNoBuffer());
-    }
-
-    /**
-     * @brief Raw, non-blocking keyboard reader on the console input buffer.
-     *
-     * @details Waits on the stdin handle with a timeout, so the same loop can also
-     * drive the metrics cadence. Line buffering and echo are disabled (single key, no
-     * Enter). QuickEdit is disabled too: with QuickEdit on, a mouse click in the console
-     * freezes stdout, the logger thread blocks inside fmt::print and log records start
-     * being dropped. The original console mode is restored by the destructor.
-     */
-    class ConsoleKeys {
-    public:
-        ConsoleKeys()
-        {
-            h_ = GetStdHandle(STD_INPUT_HANDLE);
-            if (h_ == nullptr || h_ == INVALID_HANDLE_VALUE || !GetConsoleMode(h_, &oldMode_))
-                throw std::runtime_error("stdin is not an interactive console: keyboard control unavailable");
-
-            const DWORD mode = (oldMode_ & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT
-                | ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT | ENABLE_QUICK_EDIT_MODE))
-                | ENABLE_EXTENDED_FLAGS;
-            if (!SetConsoleMode(h_, mode))
-                throw std::runtime_error("SetConsoleMode failed, GetLastError=" + std::to_string(GetLastError()));
-
-            FlushConsoleInputBuffer(h_); // ignore keys typed during the (long) initialization
-        }
-
-        ~ConsoleKeys() { SetConsoleMode(h_, oldMode_); }
-
-        ConsoleKeys(const ConsoleKeys&) = delete;
-        ConsoleKeys& operator=(const ConsoleKeys&) = delete;
-
-        /// @return The lowercase character of the next key press, or 0 on timeout / non-key events.
-        wchar_t Poll(DWORD timeoutMs)
-        {
-            if (WaitForSingleObject(h_, timeoutMs) != WAIT_OBJECT_0) return 0;
-
-            // One record per call: if more are pending, the next Poll returns immediately,
-            // so no key is lost when several events are queued at once.
-            INPUT_RECORD rec{};
-            DWORD n = 0;
-            if (!ReadConsoleInputW(h_, &rec, 1, &n) || n == 0) return 0;
-            if (rec.EventType != KEY_EVENT || !rec.Event.KeyEvent.bKeyDown) return 0;
-
-            return static_cast<wchar_t>(std::towlower(rec.Event.KeyEvent.uChar.UnicodeChar));
-        }
-
-    private:
-        HANDLE h_ = nullptr;
-        DWORD oldMode_ = 0;
-    };
-
-    /**
-     * @brief Owns the ingest thread: one thread per listening session (s ... x).
-     *
-     * @details Start() re-arms the MMF source and spawns the thread; Stop() signals the
-     * source and joins it. The stage threads are NOT touched: while not listening they
-     * simply block on an empty qRaw at zero CPU cost.
-     */
-    class IngestController {
-    public:
-        IngestController(MmfFrameSource& source, std::uint32_t readTimeoutMs, int priority)
-            : source_(source), readTimeoutMs_(readTimeoutMs), priority_(priority) {
-        }
-
-        ~IngestController() { Stop(); }
-
-        IngestController(const IngestController&) = delete;
-        IngestController& operator=(const IngestController&) = delete;
-
-        bool Listening() const { return thread_.joinable(); }
-
-        /// False if the thread exited on its own (e.g. WaitForSingleObject failure) while still "listening".
-        bool Alive() const { return alive_.load(std::memory_order_acquire); }
-
-        void Start()
-        {
-            if (thread_.joinable()) return;
-
-            source_.Start();
-            alive_.store(true, std::memory_order_release);
-            thread_ = std::thread([this] {
-                if (const DWORD err = RT::ConfigureThread(priority_); err != 0)
-                    Log::Warning("ingest: thread priority {} not applied (GetLastError={})", priority_, err);
-
-                while (source_.ReadFrame(readTimeoutMs_) != FrameStatus::Stopped) {}
-
-                alive_.store(false, std::memory_order_release);
-                });
-        }
-
-        void Stop()
-        {
-            if (!thread_.joinable()) return;
-            source_.Stop();
-            thread_.join();
-        }
-
-    private:
-        MmfFrameSource& source_;
-        const std::uint32_t readTimeoutMs_;
-        const int priority_;
-        std::thread thread_;
-        std::atomic<bool> alive_{ false };
-    };
-
-    /**
-     * @brief Owns the prep/infer/post threads and guarantees they are joined.
-     *
-     * @details Drain(): graceful stop, queues are stopped one stage at a time, in pipeline
-     * order. RingBuffer::pop keeps returning items until the queue is both stopped AND
-     * empty, so every frame already in qRaw reaches the sink.
-     * Abort() (destructor, i.e. exception path): all queues stopped at once, then join.
-     * No blocking wait survives a stopped queue, so the joins cannot hang even if a
-     * stage is missing (e.g. thread creation failed halfway through).
-     * Must be destroyed BEFORE the stores/queues it references: declare it after them.
-     */
-    class StageWorkers {
-    public:
-        StageWorkers(RingBuffer<RawFrame*>& qRaw, RingBuffer<RawFrame*>& rawPool,
-            RingBuffer<PipelineSlot*>& qPrep, RingBuffer<PipelineSlot*>& qInf,
-            RingBuffer<PipelineSlot*>& slotPool)
-            : qRaw_(qRaw), rawPool_(rawPool), qPrep_(qPrep), qInf_(qInf), slotPool_(slotPool) {
-        }
-
-        ~StageWorkers() { Abort(); }
-
-        StageWorkers(const StageWorkers&) = delete;
-        StageWorkers& operator=(const StageWorkers&) = delete;
-
-        std::vector<std::thread> prep, infer, post;
-
-        void Drain()
-        {
-            qRaw_.stop();  JoinAll(prep);
-            qPrep_.stop(); JoinAll(infer);
-            qInf_.stop();  JoinAll(post);
-            // Pools are stopped last: during the drain prep may still be waiting for a
-            // slot that a post thread is about to give back.
-            slotPool_.stop();
-            rawPool_.stop();
-        }
-
-        void Abort()
-        {
-            qRaw_.stop(); qPrep_.stop(); qInf_.stop();
-            slotPool_.stop(); rawPool_.stop();
-            JoinAll(prep); JoinAll(infer); JoinAll(post);
-        }
-
-    private:
-        static void JoinAll(std::vector<std::thread>& ts)
-        {
-            for (auto& t : ts) if (t.joinable()) t.join();
-        }
-
-        RingBuffer<RawFrame*>& qRaw_;
-        RingBuffer<RawFrame*>& rawPool_;
-        RingBuffer<PipelineSlot*>& qPrep_;
-        RingBuffer<PipelineSlot*>& qInf_;
-        RingBuffer<PipelineSlot*>& slotPool_;
-    };
 
     int Run(int argc, char** argv)
     {
@@ -323,14 +152,19 @@ namespace {
                     : "2x box (= cv::resize INTER_LINEAR)"));
         }
 
+		// The SlotStore allocates all the pinned memory for the entire pipeline, so it must be created after the model geometry is known. The store is shared
+		// between the prep, infer, and post threads, which is why it is declared here in main() and passed by reference to each stage.
         SlotStore slotStore(proto, cfg.Slots(), outMapElems, cfg.DrawMask());
 
+		// The queues are the only inter-stage communication mechanism. They are declared after the stores they reference, so the StageWorkers destructor joins the threads before the stores are destroyed.
         RingBuffer<PipelineSlot*> qPrep(cfg.QPrepCapacity());
         RingBuffer<PipelineSlot*> qInf(cfg.QInfCapacity());
 
-        PerformanceMetrics metrics(cfg.MetricsWindow(), proto.BatchSize());
+		// Telemetry: moving averages of the last N batches, plus a total batch counter.
+        PerformanceMetrics metrics(cfg.MetricsWindow());
         LoggingResultSink sink;
 
+		// The MMF source is the only producer of frames: it reads from the shared memory and pushes them into qRaw. It is declared after rawStore and qRaw, so it can be destroyed before them.
         MmfFrameSource source(layout, rawStore.Pool(), qRaw);
 
         // TensorRT Warmup: engine build/deserialization happens here, before anyone
@@ -347,6 +181,7 @@ namespace {
         // normal path and on the exception path alike.
         StageWorkers workers(qRaw, rawStore.Pool(), qPrep, qInf, slotStore.Pool());
 
+		// Prep threads: mostly CPU-bound, so they run at TIME_CRITICAL to preempt the GPU threads and keep the GPU busy. The PrepStage function is reentrant, so multiple threads can run it concurrently. 
         for (std::uint32_t i = 0; i < cfg.PrepThreads(); ++i) {
             workers.prep.emplace_back(PrepStage, std::cref(cfg), std::cref(proto),
                 std::ref(qRaw), std::ref(rawStore.Pool()),
@@ -364,6 +199,8 @@ namespace {
                 InferStage(*sessions[i], qPrep, qInf, slotStore.Pool(), metrics);
             });
         }
+
+		// Post threads: mostly CPU-bound, so they run at TIME_CRITICAL to preempt the GPU threads and keep the GPU busy. The PostStage function is reentrant, so multiple threads can run it concurrently.
         for (std::uint32_t i = 0; i < cfg.PostThreads(); ++i) {
             workers.post.emplace_back(PostStage, std::cref(cfg), std::cref(proto),
                 std::ref(qInf), std::ref(slotStore.Pool()),
@@ -377,14 +214,12 @@ namespace {
             cfg.PrepThreads(), cfg.InferenceThreads(), cfg.PostThreads());
         Log::Info("Commands: [s] start listening on MMF | [x] stop listening | [q] quit");
 
-        // Main Thread: keyboard + telemetry loop.
+        // Main Thread: keyboard loop. Metrics are not printed from here: the Post stage logs one
+        // [MONITOR] line every [Metrics] WindowDimension completed batches.
         // Poll() BLOCKS on the console handle for up to kPollMs: zero CPU while idle, and
-        // kPollMs is the telemetry granularity. With a 0 timeout this loop spun a whole
-        // core forever, at base priority 24 under REALTIME_PRIORITY_CLASS.
+        // kPollMs is how often the ingest thread liveness is checked. With a 0 timeout this
+        // loop spun a whole core forever, at base priority 24 under REALTIME_PRIORITY_CLASS.
         constexpr DWORD kPollMs = 100;
-        const auto printEvery = std::chrono::milliseconds(cfg.MetricsPrintEveryMs());
-        std::uint64_t lastBatches = 0;
-        auto nextPrint = std::chrono::steady_clock::now();
         bool quit = false;
         while (!quit) {
             switch (keys.Poll(kPollMs)) {
@@ -394,8 +229,6 @@ namespace {
                     break;
                 }
                 ingest.Start();
-                lastBatches = static_cast<std::uint64_t>(metrics.snapshot().completedBatches);
-                nextPrint = std::chrono::steady_clock::now() + printEvery;
                 Log::Info("Listening on the MMF: inference started");
                 break;
 
@@ -406,8 +239,6 @@ namespace {
                 }
                 ingest.Stop();
                 // Frames already in the pipeline complete normally: x stops the input, not the work.
-                PrintMetrics(metrics, source, lastBatches);
-                lastBatches = static_cast<std::uint64_t>(metrics.snapshot().completedBatches);
                 Log::Info("Stopped listening on the MMF. [s] to restart, [q] to quit");
                 break;
 
@@ -423,16 +254,6 @@ namespace {
                 Log::Error("Ingest thread terminated unexpectedly: listening stopped. [s] to retry");
                 ingest.Stop(); // joins the (already finished) thread
             }
-
-            // Telemetry only while listening: when idle the numbers would never change.
-            if (!ingest.Listening() || cfg.MetricsPrintEveryMs() == 0) continue;
-
-            const auto now = std::chrono::steady_clock::now();
-            if (now < nextPrint) continue;
-
-            nextPrint = now + printEvery;
-            PrintMetrics(metrics, source, lastBatches);
-            lastBatches = static_cast<std::uint64_t>(metrics.snapshot().completedBatches);
         }
 
         // Graceful Shutdown (Execution Order is Critical):
@@ -444,10 +265,15 @@ namespace {
         ingest.Stop();
         workers.Drain();
 
-        PrintMetrics(metrics, source, lastBatches);
-        Log::Info("Terminated | total batches {} | frames read {} | dropped {} | lost log messages {}",
-            metrics.snapshot().completedBatches, source.FramesRead(),
-            source.DroppedNoBuffer(), logger.DroppedCount());
+        metrics.logFinalReport({
+            .framesRead = source.FramesRead(),
+            .framesDropped = source.DroppedNoBuffer(),
+            .lostLogMessages = logger.DroppedCount(),
+            .listenedSec = ingest.ListenedSec(),
+            .prepThreads = cfg.PrepThreads(),
+            .inferThreads = cfg.InferenceThreads(),
+            .postThreads = cfg.PostThreads()
+        });
         return 0;
     }
 

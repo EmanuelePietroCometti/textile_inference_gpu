@@ -78,10 +78,11 @@ public:
     void Publish(const BatchResult& r) override
     {
         // Safe access: protects against out-of-bounds reads if a batch size of 0 is somehow passed.
-        Log::Info("Batch {} | Anomalies {}/{} | score[0]={:.4f}",
+        /*Log::Info("Batch {} | Anomalies {}/{} | score[0]={:.4f}",
             r.seq,
             r.anomalies,
             r.batch,
-            r.batch > 0 ? r.scores[0] : 0.0f);
+            r.batch > 0 ? r.scores[0] : 0.0f);*/
+        return;
     }
 };

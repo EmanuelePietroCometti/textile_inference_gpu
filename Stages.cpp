@@ -560,5 +560,6 @@ void PostStage(const AppConfig& cfg,
 
         slot->postMs = MsSince(t0);
         metrics.addPostprocessingTime(slot->postMs); // Internally increments completedBatches counter
+		metrics.printRollingAverage(result.seq);
     }
 }

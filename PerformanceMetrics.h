@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include "RollingAverage.h" // Ensures access to the thread-safe RollingField class
 
 /**
@@ -24,7 +25,6 @@ public:
     */
     struct Snapshot {
         double preprocessing = 0.0;     ///< Moving average of CPU image preparation latency.
-        double batchPrep = 0.0;         ///< Moving average of CPU batch memory alignment latency.
         double gpu = 0.0;               ///< Moving average of total GPU occupancy latency.
         double h2d = 0.0;               ///< Moving average of Host-to-Device PCIe transfer latency.
         double run = 0.0;               ///< Moving average of CUDA/TensorRT kernel execution latency.
@@ -32,13 +32,27 @@ public:
         double postprocessing = 0.0;    ///< Moving average of CPU bounding box/mask extraction latency.
         int64_t completedBatches = 0;   ///< Total number of successfully processed batches at the time of the snapshot.
     };
+
     /**
-     * @brief Constructs the metrics tracker with specific rolling window limits and batch dimensions.
-     *
-     * @param windowDimension The maximum number of recent samples to keep for each metric's moving average.
-     * @param batchSize The number of frames/images processed in a single inference batch.
+     * @brief External figures needed by the final report, owned by other modules.
      */
-    PerformanceMetrics(int windowDimension, int batchSize);
+    struct FinalReportInput {
+        std::uint64_t framesRead = 0;        ///< Frames accepted from the MMF.
+        std::uint64_t framesDropped = 0;     ///< Frames discarded because the raw pool was empty.
+        std::uint64_t lostLogMessages = 0;   ///< Log records dropped by the async logger.
+        double listenedSec = 0.0;            ///< Total time spent listening (sum of every s ... x interval).
+        std::uint32_t prepThreads = 1;       ///< Threads running the prep stage.
+        std::uint32_t inferThreads = 1;      ///< Threads running the infer stage.
+        std::uint32_t postThreads = 1;       ///< Threads running the post stage.
+    };
+    
+    /**
+     * @brief Constructs the metrics tracker.
+     *
+     * @param windowDimension Number of recent samples kept by every moving average. It is also
+     * the period of `printRollingAverage`: one `[MONITOR]` line every `windowDimension` batches.
+     */
+    explicit PerformanceMetrics(int windowDimension);
 
     /**
      * @brief Destructor. Safely cleans up the metrics tracker.
@@ -50,12 +64,6 @@ public:
      * @param t The elapsed time (typically in milliseconds).
      */
     void addPreprocessingTime(double t);
-
-    /**
-     * @brief Logs the time taken to assemble individual preprocessed frames into a contiguous memory batch.
-     * @param t The elapsed time.
-     */
-    void addBatchPrepTime(double t);
 
     /**
      * @brief Logs the total cumulative time the GPU was active for a batch.
@@ -82,18 +90,29 @@ public:
     void addD2HTime(double t);
 
     /**
-     * @brief Logs the time taken to parse network outputs (e.g., NMS, bounding box scaling) on the CPU.
+     * @brief Logs the post-processing time and counts the batch as completed.
+     *
+     * @details This is the last metric recorded for a batch, so it also advances the completed
+     * batch counter. The increment is a single atomic read-modify-write: every call, from any
+     * thread, gets a distinct index.
+     *
      * @param t The elapsed time.
+     * @return The 1-based index of the batch just completed, unique across all calling threads.
      */
-    void addPostprocessingTime(double t);
+    std::int64_t addPostprocessingTime(double t);
 
     /**
-     * @brief Outputs the current moving averages to the standard output or logger.
+     * @brief Logs the current moving averages, once every `windowDimension` completed batches.
      *
-     * @param window The specific number of recent completed batches to consider for the printout
-     * (can be independent of the `windowDimension` capacity).
+     * @details Meant to be called right after `addPostprocessingTime`, passing its return value.
+     * Because that index is unique per call, with N post-processing threads exactly one thread
+     * sees each multiple of the window and prints: no duplicate lines, none skipped. The
+     * function never re-reads the shared counter, which is what made the previous version racy.
+     * Cost on the other calls: one modulo.
+     *
+     * @param batchIndex The value returned by `addPostprocessingTime` for the batch just completed.
      */
-    void printRollingAverage(int window);
+     void printRollingAverage(std::int64_t batchIndex) const;
 
     /**
      * @brief Retrieves a point-in-time snapshot of the current performance metrics.
@@ -106,18 +125,19 @@ public:
     Snapshot snapshot() const;
 
     /**
-     * @brief Resets all tracked metrics and the completed batch counter back to zero.
+     * @brief Logs the end-of-run summary, one Log::Info per line.
+     *
+     * @details One record per line keeps each line timestamped and far below the logger's
+     * maxMessageChars. Call it after the stages are drained: nothing else is logging by then,
+     * so the lines come out contiguous. Means cover the last min(windowDimension, completed) batches.
      */
-    void clear();
-
+    void logFinalReport(const FinalReportInput& in) const;
 private:
-    int windowDimension = 0;                     ///< The capacity of the rolling windows.
-    int batchSize = 0;                           ///< The batch size used by the underlying deep learning model.
+    int windowDimension = 0;                     ///< Capacity of the rolling windows and print period, in batches.
     std::atomic<int64_t> completedBatches;       ///< Lock-free counter tracking total successfully processed batches.
 
     // Independent thread-safe moving average trackers for each pipeline stage
     RollingField preprocessing;    ///< Tracks CPU image preparation latency.
-    RollingField batchPrep;        ///< Tracks CPU batch memory alignment latency.
     RollingField gpu;              ///< Tracks total GPU occupancy latency.
     RollingField h2d;              ///< Tracks Host-to-Device PCIe transfer latency.
     RollingField run;              ///< Tracks CUDA/TensorRT kernel execution latency.
